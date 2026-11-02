@@ -4,6 +4,7 @@ import type { TimelineEvent, TurnDetail, TurnSummary } from '../shared/types';
 import { api, errorMessage, isAbort, sessionPath } from './api';
 import { Markdown } from './Markdown';
 import { ToolCard } from './ToolCard';
+import { CollaborationCard } from './CollaborationCard';
 import { clock, statusLabels, tokens } from './format';
 import { turnPresentation } from './presentation';
 
@@ -32,6 +33,7 @@ export function TurnCard({ turn, sessionId, revision, onInspect, targetTurn }: {
     try { await navigator.clipboard.writeText(url.toString()); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* Browser clipboard permissions may be unavailable. */ }
   }
   function renderEvent(event: TimelineEvent) {
+    if (event.kind === 'collaboration' && event.collaboration) return <CollaborationCard key={event.id} event={event} />;
     if (event.kind === 'user') return <div key={event.id}><span className="event-phase">补充消息 · {clock(event.timestamp)}</span><div className="user-prompt" style={{ marginLeft: 0 }}><p>{event.text || '空消息'}</p></div></div>;
     if (event.kind === 'tool' && event.tool) return <ToolCard key={event.id} tool={event.tool} sessionId={sessionId} onInspect={() => onInspect({ turnId: turn.id, toolId: event.tool!.id })} />;
     if (event.kind === 'context' || event.kind === 'reasoning' || event.kind === 'unknown') return <EventDisclosure key={event.id} event={event} />;

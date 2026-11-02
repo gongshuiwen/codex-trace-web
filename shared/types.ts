@@ -87,7 +87,14 @@ export interface TurnSummary {
   endOffset: number;
 }
 
-export type TimelineKind = 'user' | 'assistant' | 'commentary' | 'context' | 'reasoning' | 'tool' | 'notice' | 'unknown';
+export type TimelineKind = 'user' | 'assistant' | 'commentary' | 'context' | 'reasoning' | 'tool' | 'collaboration' | 'notice' | 'unknown';
+
+export interface CollaborationMessage {
+  messageType: 'MESSAGE' | 'FINAL_ANSWER';
+  taskName: string;
+  sender: string;
+  payload: string;
+}
 
 export interface ToolCall {
   id: string;
@@ -107,6 +114,7 @@ export interface TimelineEvent {
   timestamp: string;
   text: string;
   tool?: ToolCall;
+  collaboration?: CollaborationMessage;
 }
 
 export interface TurnDetail {

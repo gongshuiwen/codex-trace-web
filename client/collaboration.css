@@ -1,0 +1,21 @@
+.collaboration-card{margin:12px 0;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);overflow:hidden;min-width:0}
+.collaboration-card>summary{display:flex;align-items:center;gap:9px;padding:12px;list-style:none;cursor:pointer;min-width:0}
+.collaboration-card>summary::-webkit-details-marker{display:none}
+.collaboration-card>summary:hover{background:var(--hover)}
+.collaboration-card>summary:focus-visible{outline-offset:-3px;border-radius:7px}
+.collaboration-chevron,.collaboration-icon{color:var(--muted)}
+.collaboration-card[open]>summary .collaboration-chevron{transform:rotate(90deg)}
+.collaboration-sender{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+.collaboration-sender strong{font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.collaboration-sender small{font:10px/1.5 var(--font-mono);color:var(--muted);overflow-wrap:anywhere}
+.collaboration-badge{flex-shrink:0;border:1px solid var(--border);border-radius:5px;padding:3px 6px;font-size:10px;color:var(--soft);white-space:nowrap}
+.collaboration-badge.final{border-color:transparent;background:var(--accent-light);color:var(--accent-strong)}
+.collaboration-card>summary time{font:10px var(--font-mono);color:var(--muted);white-space:nowrap}
+.collaboration-body{padding:14px 16px;border-top:1px solid var(--border);font-size:14px;line-height:1.85;overflow-wrap:anywhere}
+.collaboration-recipient{display:flex;align-items:baseline;gap:8px;margin-bottom:12px;color:var(--muted);font-size:11px}
+.collaboration-recipient code{font:11px var(--font-mono);overflow-wrap:anywhere}
+.collaboration-empty{margin:0;color:var(--muted);font-size:12px}
+.collaboration-raw{margin-top:14px;color:var(--muted);font-size:11px}
+.collaboration-raw>summary{cursor:pointer;padding:4px 0}
+.collaboration-raw pre{max-height:320px;overflow:auto;margin:8px 0 0;background:var(--code);border:1px solid var(--border);border-radius:6px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.7 var(--font-mono);color:var(--soft)}
+@media(max-width:600px){.collaboration-card>summary{gap:7px;padding:10px}.collaboration-card>summary time{display:none}.collaboration-body{padding:12px}.collaboration-icon{width:14px}}

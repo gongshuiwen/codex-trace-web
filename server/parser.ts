@@ -3,8 +3,9 @@ import { open, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { IndexedSession } from './parser-types.js';
-import type { OutputPage, SessionSummary, TimelineEvent, ToolCall, TurnDetail, TurnSummary } from '../shared/types.js';
+import type { CollaborationMessage, OutputPage, SessionSummary, TimelineEvent, ToolCall, TurnDetail, TurnSummary } from '../shared/types.js';
 import { UsageLedger } from './usage.js';
+import { parseCollaborationMessage } from './collaboration.js';
 
 type Json = Record<string, any>;
 interface Line { start: number; end: number; value: Json | null; partial?: boolean; }
@@ -130,7 +131,7 @@ function currentTurn(state: CachedIndex, payload: Json, timestamp: string, offse
   return ensureTurn(state, explicit || state.currentTurnId || `turn-${++state.counter}`, timestamp, offset);
 }
 
-function classifyMessage(type: string, payload: Json): { kind: string; text: string; eventPrompt: boolean } | null {
+function classifyMessage(type: string, payload: Json): { kind: string; text: string; eventPrompt: boolean; collaboration?: CollaborationMessage } | null {
   if (type === 'event_msg') {
     if (payload.type === 'user_message') return { kind: 'user', text: messageText(payload), eventPrompt: true };
     if (payload.type === 'agent_message') return { kind: payload.phase === 'commentary' ? 'commentary' : 'assistant', text: messageText(payload), eventPrompt: false };
@@ -144,7 +145,11 @@ function classifyMessage(type: string, payload: Json): { kind: string; text: str
       : role === 'user' ? 'user' : payload.phase === 'commentary' || payload.channel === 'commentary' ? 'commentary' : 'assistant', text, eventPrompt: false };
   }
   if (itemType === 'reasoning') return { kind: 'reasoning', text: contentText(payload.summary ?? []), eventPrompt: false };
-  if (itemType === 'agent_message') return { kind: 'notice', text: contentText(payload.content), eventPrompt: false };
+  if (itemType === 'agent_message') {
+    const text = contentText(payload.content);
+    const collaboration = parseCollaborationMessage(text);
+    return { kind: collaboration ? 'collaboration' : 'notice', text, eventPrompt: false, ...(collaboration ? { collaboration } : {}) };
+  }
   return null;
 }
 
@@ -384,7 +389,7 @@ export async function loadTurnDetail(filePath: string, turnId: string): Promise<
         // The duplicate response_item prompt is retained once, at its original position.
       }
       if (!(kind === 'user' && !message.eventPrompt && hasEventPrompt && messageIds.has(`user:${message.text}`))) {
-        push({ id: `event-${line.start}`, kind, timestamp, text: message.text });
+        push({ id: `event-${line.start}`, kind, timestamp, text: message.text, ...(message.collaboration ? { collaboration: message.collaboration } : {}) });
       }
     }
     const shape = toolShape(type, payload);
