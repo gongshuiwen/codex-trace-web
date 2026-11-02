@@ -1,0 +1,101 @@
+# 会话观察台 · Session Lens
+
+本机使用的 Codex 会话浏览器，采用 Node.js、Vite、React、TypeScript 与 Tailwind CSS。参考 Codex Trace v0.6.0 的日志浏览能力，重新设计中文界面，并区分单次模型调用、用户轮次与整个会话的 token 用量。
+
+## 运行
+
+要求 Node.js 24+、pnpm 11+。在 PowerShell 7 中：
+
+```powershell
+Set-Location .\codex-trace-web
+pnpm install
+pnpm dev
+```
+
+开发页面：<http://127.0.0.1:5173>，API：<http://127.0.0.1:4317>。
+
+生产运行：
+
+```powershell
+pnpm build
+pnpm start
+```
+
+打开 <http://127.0.0.1:4317>。开发和生产服务使用相同后端端口，不要同时启动两份服务。
+
+直接打开指定会话：
+
+```text
+http://127.0.0.1:4317/?session=<session-id>&turn=<turn-id>
+```
+
+## 能力
+
+- 按项目和日期浏览会话；搜索标题、工作目录和用户/助手对话正文，结果定位到轮次。
+- 连续时间线、Markdown 与代码高亮；注入上下文和工具结果默认收起，长工具输出分段加载。
+- 会话内查找包括工具参数和完整工具输出；显示父子会话并支持跳转。
+- 显示模型调用用量、轮次汇总、会话累计、缓存读取及最近调用输入。
+- SSE 实时更新、后台索引进度、主题切换、窄屏布局、会话深链接。
+- 适配 Desktop 和 CLI 的 `response_item`、`event_msg`、`token_usage_record` 日志；坏行不阻止后续解析。
+
+原始 JSONL 始终只读。应用不执行日志中的命令，不删除、编辑或上传日志内容。
+
+## 设置
+
+日志目录默认来自 `CODEX_HOME/sessions`；未配置时为 `~/.codex/sessions`。点击界面设置可更改目录。
+
+可选环境变量：
+
+| 变量 | 用途 |
+| --- | --- |
+| `SESSION_LENS_SESSIONS_DIR` | 启动时指定日志根目录，优先于已保存设置 |
+| `SESSION_LENS_DATA_DIR` | 本地设置与可重建 SQLite 索引目录 |
+| `SESSION_LENS_PORT` | Node 服务端口，默认 4317 |
+
+Windows 数据目录默认 `%LOCALAPPDATA%\codex-session-lens`。其他平台默认 `~/.local/share/codex-session-lens`。切换日志根目录会使用独立索引，重新启动会复用未变动文件的摘要缓存。删除缓存可重建，不影响原始会话。
+
+```powershell
+$env:SESSION_LENS_SESSIONS_DIR = Join-Path $env:USERPROFILE '.codex/sessions'
+pnpm start
+```
+
+界面日期和时间按浏览器本地时区显示。索引期间可浏览已发现结果，搜索范围会随索引进度扩大。
+
+## Token 口径
+
+- **单次调用**：优先采用 `token_usage_record.usage`，按 `response_id` 去重；缺少该记录时从 `token_count` 的累计快照推导，并标记来源。
+- **用户轮次**：汇总归属同一轮次的模型调用。缺失记录或无法可靠归属时标为不完整。
+- **整个会话**：使用唯一调用汇总并参考日志累计快照；不会把连续累计快照相加。
+- **缓存输入**包含在输入中，**推理输出**包含在输出中，均不重复累加。
+- **最近调用输入**是最近一次记录的输入量。它与整个会话累计消耗不同，也不等于压缩后准确的实时上下文大小。
+- 缺失值显示未知，零表示日志确实记录为零。首版不估算美元费用或订阅扣费。
+
+### 每次调用的上下文分析
+
+在“统计与明细”抽屉中展开某条模型调用，可按需查看用户消息、项目指令、Skills、工具定义、工具输出和其他可见文本的 token 估算。分析在独立后台线程运行，结果仅包含分类计数和依据。
+
+输入总量来自日志的原始用量记录；分类值使用本地 `o200k_base` 分词器估算。优先按照日志记录的消息来源标记分类，再识别明确的结构标记。分析不读取当前磁盘中的 AGENTS.md 或 SKILL.md 来替代历史内容，也不向外部服务发送日志。
+
+调用输入边界由本次生成内容开始的位置推断，排除本次生成的回复与调用参数；前次返回的工具输出作为后续调用的可见历史。日志没有完整输入快照，因此历史裁剪、指令替换和实际保留范围仍可能造成偏差。较长文本可通过样本外推，界面会单独标注。
+
+每个分类会标为“估算”“部分估算”或“无法统计”，未知值不会当作零。差额仅是“记录输入 − 可估文本合计”的对账结果，可能包含缺失内容与估算误差，不能当作精确的隐藏上下文用量；估算超出记录输入时会保留负差额并明确提示。分类计数不会增加或改变原有 usage。
+
+累计快照差值可能包含多个缺失的调用，无法分析为单次输入；压缩后的分析仅覆盖可恢复的可见内容。未记录的工具定义、图像、消息协议封装与加密推理无法完整统计。参见 [OpenAI token 计数说明](https://developers.openai.com/api/docs/guides/token-counting)。
+
+日志格式会随 Codex 版本变化，未识别事件可查看原始内容；加密推理无法恢复。应用不会从浏览器读取日志目录之外的图片或其他文件，引用会以文本显示。
+
+## 开发与验证
+
+```powershell
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+`client/` 为浏览器应用，`server/` 为 Fastify API、Worker 索引和日志解析，`shared/` 为前后端共享类型，`tests/` 使用合成日志进行回归。源码不包含个人日志和索引数据库。
+
+Node.js 24 的 `node:sqlite` 可能打印实验性提示；应用使用其内置 SQLite，避免额外安装原生数据库模块。
+
+## 来源与许可
+
+功能参考：[Codex Trace v0.6.0](https://github.com/PixelPaw-Labs/codex-trace/tree/v0.6.0)。本项目采用 MIT 许可，相关上游版权与完整许可见 `THIRD_PARTY_NOTICES.md`。本项目为独立本地工具，与 OpenAI 无隶属关系。
