@@ -1,0 +1,140 @@
+.context-group {
+  margin: 12px 0 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--code);
+}
+
+.event-disclosure-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: left;
+  color: var(--soft);
+  font-size: var(--fs-small);
+}
+
+.event-disclosure-toggle:hover,
+.context-source-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.event-disclosure-title {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.context-group-sources {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.context-group-count,
+.event-character-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.context-group-body {
+  padding: 0 12px 8px;
+}
+
+.context-source {
+  border-top: 1px solid var(--border);
+}
+
+.context-source-toggle {
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 5px;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 10px 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--soft);
+  text-align: left;
+  font-size: var(--fs-small);
+}
+
+.context-source-label {
+  font-weight: 500;
+}
+
+.context-source-preview {
+  grid-column: 2 / -1;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.context-source-toggle-unlabeled .event-character-count {
+  grid-column: 3;
+}
+
+.context-source-toggle-unlabeled .context-source-preview {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.event-raw {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0 0 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--code);
+  color: var(--soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--fs-small)/1.7 var(--font-mono);
+}
+
+.context-source .event-raw {
+  margin: 0 8px 12px 29px;
+  background: var(--panel);
+}
+
+@media (max-width: 600px) {
+  .context-group-toggle {
+    flex-wrap: wrap;
+  }
+
+  .context-group-sources {
+    order: 1;
+    flex-basis: 100%;
+    margin-left: 43px;
+  }
+
+  .context-group-body {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .context-source .event-raw {
+    margin-left: 8px;
+  }
+}
