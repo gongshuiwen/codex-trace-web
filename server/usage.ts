@@ -90,6 +90,7 @@ export class UsageLedger {
   private resolve(): { requests: RequestUsage[]; partial: boolean } {
     if (this.resolved) return this.resolved;
     const records = [...this.records.values()];
+    const sequence = new Map(records.map(record => [record.id, record.sequence]));
     const requests: RequestUsage[] = records.map(({ sequence: _sequence, cumulative: _cumulative, ...request }) => ({
       ...request, contextWindow: request.contextWindow ?? this.contextWindows.get(request.turnId),
     }));
@@ -127,17 +128,30 @@ export class UsageLedger {
       if (usage.totalTokens <= 0 && usage.inputTokens <= 0 && usage.outputTokens <= 0) return;
       partial = true; // A delta can cover more than one model call; never claim complete tracing.
       const snapshot = interval.snapshot;
+      sequence.set(`snapshot-${snapshot.sequence}`, snapshot.sequence);
       requests.push({
         id: `snapshot-${snapshot.sequence}`, turnId: snapshot.turnId, timestamp: snapshot.timestamp,
         usage, source: 'snapshot-delta', model: snapshot.model, contextWindow: snapshot.contextWindow,
       });
     });
-    this.resolved = { requests: requests.sort((left, right) => left.timestamp.localeCompare(right.timestamp)), partial };
+    this.resolved = { requests: requests.sort((left, right) => sequence.get(left.id)! - sequence.get(right.id)!), partial };
     return this.resolved;
   }
 
   requestsForTurn(turnId: string): RequestUsage[] {
     return this.resolve().requests.filter(request => request.turnId === turnId);
+  }
+
+  requestsInOrder(): RequestUsage[] {
+    return this.resolve().requests.slice();
+  }
+
+  countRequestsBefore(sequence: number): number {
+    return this.resolve().requests.filter(request => {
+      const position = request.source === 'record' ? this.records.get(request.id)?.sequence
+        : Number(request.id.slice('snapshot-'.length));
+      return position !== undefined && position < sequence;
+    }).length;
   }
 
   summary(turnId?: string): UsageSummary {

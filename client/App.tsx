@@ -7,9 +7,11 @@ import { Sidebar } from './Sidebar';
 import { SessionStats } from './Stats';
 import { TurnCard, type Inspection } from './TurnCard';
 import { statusLabels } from './format';
+import { useReadingPosition } from './useReadingPosition';
 
 const DetailDrawer = lazy(() => import('./DetailDrawer').then(module => ({ default: module.DetailDrawer })));
 const SettingsModal = lazy(() => import('./SettingsModal').then(module => ({ default: module.SettingsModal })));
+const SessionOverview = lazy(() => import('./SessionOverview'));
 
 function readLocation() {
   const params = new URLSearchParams(window.location.search);
@@ -31,6 +33,7 @@ function writeLocation(session: string, turn?: string, replace = false) {
 
 export function App() {
   const [location, setLocation] = useState(readLocation);
+  const [navigationVersion, setNavigationVersion] = useState(0);
   const [sessions, setSessions] = useState<SessionList | null>(null);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState('');
@@ -65,7 +68,7 @@ export function App() {
   }, [theme]);
   useEffect(() => { const timer = setTimeout(() => setDebouncedQuery(query.trim()), 220); return () => clearTimeout(timer); }, [query]);
   useEffect(() => {
-    const handler = () => { setLocation(readLocation()); setInspection(null); };
+    const handler = () => { setLocation(readLocation()); setNavigationVersion(value => value + 1); setInspection(null); };
     window.addEventListener('popstate', handler); return () => window.removeEventListener('popstate', handler);
   }, []);
 
@@ -124,7 +127,14 @@ export function App() {
 
   const selectSession = useCallback((value: SessionSummary) => {
     writeLocation(value.id, value.match?.turnId); setLocation({ session: value.id, turn: value.match?.turnId ?? null }); setInspection(null);
+    setNavigationVersion(version => version + 1);
     if (window.innerWidth < 900) setSidebarOpen(false);
+  }, []);
+  const navigateTurn = useCallback((turnId: string) => {
+    const sessionId = locationRef.current.session;
+    if (!sessionId) return;
+    writeLocation(sessionId, turnId); setLocation({ session: sessionId, turn: turnId });
+    setNavigationVersion(version => version + 1); setInspection(null);
   }, []);
 
   useEffect(() => {
@@ -154,38 +164,35 @@ export function App() {
       {sessionError && <div className="main-error" role="alert"><FileSearch size={26} /><h2>暂时无法读取会话</h2><p>{sessionError}</p><button className="secondary-button" onClick={() => setSessionVersion(value => value + 1)}>重新读取</button></div>}
       {!sessionError && !activeSession && (sessionLoading || listLoading) && <div className="welcome-state"><LoaderCircle size={28} className="spin" /><h2>正在读取本地会话</h2><p>先载入摘要，详细内容按需读取。</p></div>}
       {!sessionError && !activeSession && !sessionLoading && !listLoading && <div className="welcome-state"><div className="welcome-icon"><Layers3 size={32} /></div><span className="eyebrow">YOUR LOCAL CONVERSATIONS</span><h1>每一次思考，都有迹可循。</h1><p>浏览 Codex 会话、工具调用与 token 用量。<br />从左侧选择一个会话，或设置日志目录。</p><button className="primary-button" onClick={() => setShowSettings(true)}><FolderOpen size={16} />选择日志目录</button></div>}
-      {activeSession && !sessionError && <SessionWorkspace key={activeSession.session.id} session={activeSession} reloadVersion={sessionVersion} targetTurn={location.turn} onInspect={setInspection} onSelectSession={selectSession} onTargetTurn={turnId => { writeLocation(activeSession.session.id, turnId); setLocation({ session: activeSession.session.id, turn: turnId }); }} />}
+      {activeSession && !sessionError && <SessionWorkspace key={activeSession.session.id} session={activeSession} reloadVersion={sessionVersion} targetTurn={location.turn} navigationVersion={navigationVersion} onInspect={setInspection} onSelectSession={selectSession} onTargetTurn={navigateTurn} />}
       <footer className="statusbar"><span><Check size={12} />只读浏览器</span><span>Node.js · 本地日志</span><span className="statusbar-right">SESSION LENS<span className="version">v0.1</span></span></footer>
     </main>
-    {inspection && activeSession && <Suspense fallback={null}><DetailDrawer session={activeSession} selection={inspection} onClose={() => setInspection(null)} /></Suspense>}
+    {inspection && activeSession && <Suspense fallback={null}><DetailDrawer session={activeSession} selection={inspection} onClose={() => setInspection(null)} onNavigateTurn={navigateTurn} /></Suspense>}
     {showSettings && <Suspense fallback={null}><SettingsModal onClose={() => setShowSettings(false)} onSaved={() => { setSessions(null); setSession(null); setLocation({ session: null, turn: null }); const url = new URL(window.location.href); url.searchParams.delete('session'); url.searchParams.delete('turn'); window.history.replaceState({}, '', url); setListVersion(value => value + 1); }} /></Suspense>}
     {showShortcuts && <div className="shortcut-popover"><div><strong>键盘快捷键</strong><button className="icon-button" onClick={() => setShowShortcuts(false)} aria-label="关闭快捷键"><X size={14} /></button></div><p><span>搜索会话</span><kbd>/</kbd></p><p><span>上 / 下一个会话</span><span><kbd>k</kbd> <kbd>j</kbd></span></p><p><span>打开设置</span><kbd>,</kbd></p><p><span>关闭面板</span><kbd>Esc</kbd></p><p><span>显示快捷键</span><kbd>?</kbd></p></div>}
   </div>;
 }
 
-function SessionWorkspace({ session, reloadVersion, targetTurn, onInspect, onSelectSession, onTargetTurn }: { session: SessionDetail; reloadVersion: number; targetTurn: string | null; onInspect: (selection: Inspection) => void; onSelectSession: (session: SessionSummary) => void; onTargetTurn: (id: string) => void }) {
+function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersion, onInspect, onSelectSession, onTargetTurn }: { session: SessionDetail; reloadVersion: number; targetTurn: string | null; navigationVersion: number; onInspect: (selection: Inspection) => void; onSelectSession: (session: SessionSummary) => void; onTargetTurn: (id: string) => void }) {
   const virtuoso = useRef<VirtuosoHandle>(null);
   const atBottom = useRef(true);
   const [newContent, setNewContent] = useState(false);
   const previousRevision = useRef(session.session.revision);
   const [showToolSearch, setShowToolSearch] = useState(false);
+  const [view, setView] = useState<'conversation' | 'tokens' | 'collaboration'>('conversation');
   const [toolQuery, setToolQuery] = useState('');
   const [matches, setMatches] = useState<{ turnId: string; eventId: string; text: string }[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const searchController = useRef<AbortController | null>(null);
-  const turnsRef = useRef(session.turns); turnsRef.current = session.turns;
+  const reading = useReadingPosition(session.session.id, session.turns.map(turn => turn.id), targetTurn, navigationVersion, virtuoso);
   useEffect(() => {
     if (previousRevision.current !== session.session.revision) {
       if (!atBottom.current) setNewContent(true);
       previousRevision.current = session.session.revision;
     }
   }, [session.session.revision]);
-  useEffect(() => {
-    if (!targetTurn) return;
-    const index = turnsRef.current.findIndex(turn => turn.id === targetTurn);
-    if (index >= 0) { atBottom.current = false; const timer = setTimeout(() => virtuoso.current?.scrollToIndex({ index, align: 'start' }), 70); return () => clearTimeout(timer); }
-  }, [targetTurn]);
+  useEffect(() => { if (targetTurn) { atBottom.current = false; setView('conversation'); } }, [targetTurn, navigationVersion]);
   useEffect(() => () => searchController.current?.abort(), []);
   async function searchTools(event: React.FormEvent) {
     event.preventDefault(); if (!toolQuery.trim()) return;
@@ -194,16 +201,20 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, onInspect, onSel
     try { const result = await api<{ matches: { turnId: string; eventId: string; text: string }[] }>(`${sessionPath(session.session.id)}/search?query=${encodeURIComponent(toolQuery.trim())}`, { signal: controller.signal }); if (!controller.signal.aborted) setMatches(result.matches); } catch (cause) { if (!isAbort(cause)) setSearchError(errorMessage(cause)); } finally { if (!controller.signal.aborted) setSearching(false); }
   }
   const value = session.session;
+  const navigateToTurn = (turnId: string) => { setView('conversation'); onTargetTurn(turnId); };
   return <div className="session-workspace">
     <header className="session-header"><div className="session-eyebrow"><span className="eyebrow">CONVERSATION</span><span className={`status-label ${value.status}`}><Circle size={6} fill="currentColor" />{statusLabels[value.status]}</span></div><h1>{value.title || '未命名会话'}</h1><div className="session-location"><FolderOpen size={14} /><span title={value.cwd}>{value.cwd || '工作目录未记录'}</span>{value.branch && <><i /><GitBranch size={13} /><span>{value.branch}</span></>}<i /><span>{value.model || '模型未记录'}</span></div>
       <SessionStats usage={value.usage} onDetails={() => onInspect({})} />
       {(session.parent || session.children.length > 0) && <div className="related-sessions">{session.parent && <button onClick={() => onSelectSession(session.parent!)}><ArrowLeft size={12} />父会话 · {session.parent.title || session.parent.project}</button>}{session.children.map(child => <button key={child.id} onClick={() => onSelectSession(child)}><GitBranch size={12} />{child.title || child.project}<ArrowUpRight size={12} /></button>)}</div>}
     </header>
-    <div className="timeline-toolbar"><div><span className="timeline-marker" /><strong>会话时间线</strong><span>{session.turns.length} 轮</span></div><button className={showToolSearch ? 'active text-button' : 'text-button'} onClick={() => setShowToolSearch(!showToolSearch)}><Search size={14} />搜索工具内容</button></div>
-    {showToolSearch && <div className="tool-search-panel"><form onSubmit={event => void searchTools(event)}><Search size={14} /><input value={toolQuery} onChange={event => setToolQuery(event.target.value)} placeholder="按需搜索本会话的工具参数与输出" aria-label="搜索工具内容" /><button type="submit" disabled={searching || !toolQuery.trim()}>{searching ? '搜索中…' : '搜索'}</button><button type="button" className="icon-button" aria-label="关闭工具搜索" onClick={() => setShowToolSearch(false)}><X size={14} /></button></form>{searchError && <p className="inline-error">{searchError}</p>}{matches && <div className="tool-search-results">{matches.length === 0 ? <p>没有匹配的工具内容</p> : matches.map((match, index) => <button key={`${match.eventId}-${index}`} onClick={() => onTargetTurn(match.turnId)}><span>第 {(session.turns.find(turn => turn.id === match.turnId)?.index ?? 0) + 1} 轮</span><p>{match.text}</p><ArrowUpRight size={12} /></button>)}</div>}</div>}
-    <div className="timeline-viewport">
-      {session.turns.length === 0 ? <div className="timeline-empty"><Layers3 size={24} /><p>会话已载入，还没有可展示的轮次。</p></div> : <Virtuoso ref={virtuoso} className="turn-virtuoso" data={session.turns} computeItemKey={(_, turn) => turn.id} increaseViewportBy={600} followOutput={bottom => bottom ? 'smooth' : false} atBottomThreshold={100} atBottomStateChange={value => { atBottom.current = value; if (value) setNewContent(false); }} itemContent={(_, turn) => <TurnCard turn={turn} sessionId={value.id} revision={`${value.revision}:${reloadVersion}`} targetTurn={targetTurn} onInspect={onInspect} />} />}
-      {newContent && <button className="new-content-button" onClick={() => { virtuoso.current?.scrollToIndex({ index: session.turns.length - 1, align: 'end', behavior: 'smooth' }); setNewContent(false); }}><ArrowDown size={14} />有新内容，跳到最新</button>}
+    <div className="timeline-toolbar"><div className="timeline-view-buttons" aria-label="会话视图">{([['conversation', '对话'], ['tokens', 'Token 与压缩'], ['collaboration', '子代理协作']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>)}</div>{view === 'conversation' && <button className={showToolSearch ? 'active text-button' : 'text-button'} onClick={() => setShowToolSearch(!showToolSearch)}><Search size={14} />搜索工具内容</button>}</div>
+    {view === 'conversation' && showToolSearch && <div className="tool-search-panel"><form onSubmit={event => void searchTools(event)}><Search size={14} /><input value={toolQuery} onChange={event => setToolQuery(event.target.value)} placeholder="按需搜索本会话的工具参数与输出" aria-label="搜索工具内容" /><button type="submit" disabled={searching || !toolQuery.trim()}>{searching ? '搜索中…' : '搜索'}</button><button type="button" className="icon-button" aria-label="关闭工具搜索" onClick={() => setShowToolSearch(false)}><X size={14} /></button></form>{searchError && <p className="inline-error">{searchError}</p>}{matches && <div className="tool-search-results">{matches.length === 0 ? <p>没有匹配的工具内容</p> : matches.map((match, index) => <button key={`${match.eventId}-${index}`} onClick={() => navigateToTurn(match.turnId)}><span>第 {(session.turns.find(turn => turn.id === match.turnId)?.index ?? 0) + 1} 轮</span><p>{match.text}</p><ArrowUpRight size={12} /></button>)}</div>}</div>}
+    <div className="workspace-content">
+    {view !== 'conversation' && <Suspense fallback={<div className="turn-loading">正在打开会话视图…</div>}><SessionOverview session={session} view={view} onInspect={onInspect} onSelectSession={onSelectSession} onNavigateTurn={navigateToTurn} /></Suspense>}
+    <div className="timeline-viewport" aria-hidden={view !== 'conversation'} style={view === 'conversation' ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}>
+      {session.turns.length === 0 ? <div className="timeline-empty"><Layers3 size={24} /><p>会话已载入，还没有可展示的轮次。</p></div> : <Virtuoso ref={virtuoso} className="turn-virtuoso" data={session.turns} computeItemKey={(_, turn) => turn.id} scrollerRef={reading.scrollerRef} totalListHeightChanged={reading.onLayoutChanged} rangeChanged={reading.onLayoutChanged} increaseViewportBy={600} followOutput={reading.followOutput} atBottomThreshold={100} atBottomStateChange={value => { atBottom.current = value; if (value) setNewContent(false); }} itemContent={(_, turn) => <TurnCard turn={turn} sessionId={value.id} revision={`${value.revision}:${reloadVersion}`} targetTurn={targetTurn} onInspect={onInspect} onReady={reading.onTurnReady} />} />}
+      {newContent && <button className="new-content-button" onClick={() => { reading.cancelNavigation(); virtuoso.current?.scrollToIndex({ index: session.turns.length - 1, align: 'end', behavior: 'smooth' }); setNewContent(false); }}><ArrowDown size={14} />有新内容，跳到最新</button>}
+    </div>
     </div>
   </div>;
 }

@@ -7,26 +7,35 @@ import { ToolCard } from './ToolCard';
 import { CollaborationCard } from './CollaborationCard';
 import { clock, statusLabels, tokens } from './format';
 import { turnPresentation } from './presentation';
+import { turnDetailCache } from './turn-detail-cache';
 
-export interface Inspection { turnId?: string; toolId?: string }
+export interface Inspection { turnId?: string; toolId?: string; requestId?: string }
 
 function EventDisclosure({ event }: { event: TimelineEvent }) {
   const [open, setOpen] = useState(false);
   return <details className="context-event" onToggle={event => setOpen(event.currentTarget.open)}><summary><ChevronRight size={13} />{event.kind === 'context' ? '附带上下文' : event.kind === 'reasoning' ? '日志中的推理摘要' : '其他日志事件'}<small>{event.text.length.toLocaleString()} 字符</small></summary>{open && <pre>{event.text || '此事件没有可显示的文本'}</pre>}</details>;
 }
 
-export function TurnCard({ turn, sessionId, revision, onInspect, targetTurn }: { turn: TurnSummary; sessionId: string; revision: string; onInspect: (selection: Inspection) => void; targetTurn: string | null }) {
-  const [detail, setDetail] = useState<TurnDetail | null>(null);
+export function TurnCard({ turn, sessionId, revision, onInspect, targetTurn, onReady }: { turn: TurnSummary; sessionId: string; revision: string; onInspect: (selection: Inspection) => void; targetTurn: string | null; onReady?: (turnId: string) => void }) {
+  const [cached] = useState(() => turnDetailCache.get(sessionId, turn.id));
+  const [detail, setDetail] = useState<TurnDetail | null>(cached?.data ?? null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [settledRequest, setSettledRequest] = useState(() => cached?.revision === revision ? `${sessionId}:${turn.id}:${revision}:0` : '');
+  const requestKey = `${sessionId}:${turn.id}:${revision}:${retry}`;
+  const ready = settledRequest === requestKey;
   useEffect(() => {
     const controller = new AbortController();
     setError('');
-    api<TurnDetail>(`${sessionPath(sessionId)}/turns/${encodeURIComponent(turn.id)}`, { signal: controller.signal }).then(result => { if (!controller.signal.aborted) { setDetail(result); setError(''); } }).catch(cause => { if (!isAbort(cause)) setError(errorMessage(cause)); });
+    const previous = turnDetailCache.get(sessionId, turn.id);
+    if (previous) setDetail(previous.data);
+    if (previous?.revision === revision && retry === 0) { setSettledRequest(requestKey); return () => controller.abort(); }
+    api<TurnDetail>(`${sessionPath(sessionId)}/turns/${encodeURIComponent(turn.id)}`, { signal: controller.signal }).then(result => { if (!controller.signal.aborted) { turnDetailCache.put(sessionId, turn.id, revision, result); setDetail(result); setError(''); setSettledRequest(requestKey); } }).catch(cause => { if (!controller.signal.aborted && !isAbort(cause)) { setError(errorMessage(cause)); setSettledRequest(requestKey); } });
     return () => controller.abort();
   }, [sessionId, turn.id, revision, retry]);
+  useEffect(() => { if (ready) onReady?.(turn.id); }, [ready, onReady, turn.id]);
 
   async function copyLink() {
     const url = new URL(window.location.href); url.searchParams.set('session', sessionId); url.searchParams.set('turn', turn.id);
@@ -42,7 +51,7 @@ export function TurnCard({ turn, sessionId, revision, onInspect, targetTurn }: {
   }
   const presentation = turnPresentation(turn.prompt, detail?.events);
   const prompt = presentation.prompt || '此轮没有用户文本';
-  return <article className={`turn-card ${targetTurn === turn.id ? 'target-turn' : ''}`} data-turn-id={turn.id}>
+  return <article className={`turn-card ${targetTurn === turn.id ? 'target-turn' : ''}`} data-turn-id={turn.id} data-turn-ready={ready ? 'true' : 'false'}>
     <div className="turn-heading"><div className="turn-order">{String(turn.index + 1).padStart(2, '0')}</div><div className="turn-heading-meta"><span>用户请求</span><time>{clock(turn.startedAt)}</time></div><button className="turn-link" title="复制此轮链接" aria-label="复制此轮链接" onClick={() => void copyLink()}>{copied ? <Check size={13} /> : <Copy size={13} />}</button></div>
     <div className="user-prompt"><p>{promptExpanded || prompt.length <= 1200 ? prompt : `${prompt.slice(0, 1200)}…`}</p>{prompt.length > 1200 && <button className="text-button" onClick={() => setPromptExpanded(!promptExpanded)}>{promptExpanded ? '收起请求' : '展开完整请求'}<ChevronDown size={12} /></button>}</div>
     <div className="assistant-heading"><span className="agent-symbol">C</span><strong>Codex</strong><span className="model-label">{turn.model || '模型未记录'}</span><span className={`status-label ${turn.status}`}><Circle size={6} fill="currentColor" />{statusLabels[turn.status]}</span></div>

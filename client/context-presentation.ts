@@ -20,3 +20,7 @@ export function contextRow(component: ContextComponent, inputTokens: number) {
 export function signedContextTokens(value: number | null) {
   return value == null ? '无法对账' : value.toLocaleString('zh-CN');
 }
+
+export function signedTokenDelta(value: number | null, estimated = false) {
+  return value == null ? '无法比较' : `${estimated ? '≈ ' : ''}${value > 0 ? '+' : ''}${value.toLocaleString('zh-CN')}`;
+}

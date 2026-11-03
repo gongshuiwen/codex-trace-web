@@ -3,7 +3,7 @@ import { open, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { IndexedSession } from './parser-types.js';
-import type { CollaborationMessage, OutputPage, SessionSummary, TimelineEvent, ToolCall, TurnDetail, TurnSummary } from '../shared/types.js';
+import type { CollaborationMessage, OutputPage, RequestUsage, SessionActivity, SessionSummary, TimelineEvent, ToolCall, TurnDetail, TurnSummary } from '../shared/types.js';
 import { UsageLedger } from './usage.js';
 import { parseCollaborationMessage } from './collaboration.js';
 
@@ -33,6 +33,8 @@ interface CachedIndex {
   ended: boolean;
   hasTaskStarted: boolean;
   entryOrdinal: number;
+  compactions: { id: string; turnId?: string; timestamp: string; offset: number }[];
+  activityMessages: SessionActivity['messages'];
   index: IndexedSession | null;
 }
 
@@ -112,7 +114,8 @@ async function* readLines(filePath: string, start = 0, end?: number): AsyncGener
 
 function emptyState(): CachedIndex {
   return { fingerprint: '', identity: '', prefix: '', anchor: '', scanOffset: 0, meta: {}, turns: new Map(), currentTurnId: '', counter: 0,
-    ledger: new UsageLedger(), outputs: new Map(), parseErrors: 0, partialTail: false, model: '', ended: false, hasTaskStarted: false, entryOrdinal: 0, index: null };
+    ledger: new UsageLedger(), outputs: new Map(), parseErrors: 0, partialTail: false, model: '', ended: false, hasTaskStarted: false, entryOrdinal: 0,
+    compactions: [], activityMessages: [], index: null };
 }
 
 function ensureTurn(state: CachedIndex, id: string, timestamp: string, offset: number): MutableTurn {
@@ -193,6 +196,10 @@ function processLine(state: CachedIndex, line: Line): void {
   }
   const historyStart = state.meta.subagent_history_start_ordinal;
   if (typeof historyStart === 'number' && ordinal < historyStart) return;
+  if (type === 'compacted') {
+    const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : state.currentTurnId;
+    state.compactions.push({ id: `notice-${line.start}`, timestamp, offset: line.start, ...(turnId ? { turnId } : {}) });
+  }
   if (type === 'session_end') { state.ended = true; return; }
   if (type === 'event_msg' && payload.type === 'task_started') {
     state.hasTaskStarted = true;
@@ -219,6 +226,12 @@ function processLine(state: CachedIndex, line: Line): void {
     && !(type === 'token_usage_record' && typeof payload.turn_id === 'string')) return;
   const turn = currentTurn(state, payload, timestamp, line.start);
   turn.summary.endOffset = line.end;
+  if (classified?.collaboration) {
+    const collaboration = classified.collaboration;
+    const preview = collaboration.payload.length > 200 ? `${collaboration.payload.slice(0, 199).replace(/[\uD800-\uDBFF]$/, '')}…` : collaboration.payload;
+    state.activityMessages.push({ id: `event-${line.start}`, turnId: turn.summary.id, timestamp,
+      messageType: collaboration.messageType, sender: collaboration.sender, taskName: collaboration.taskName, preview });
+  }
   if (type === 'turn_context') {
     state.model = typeof payload.model === 'string' ? payload.model : state.model;
     turn.summary.model = state.model;
@@ -238,7 +251,7 @@ function processLine(state: CachedIndex, line: Line): void {
     let kind = classified.kind;
     if (kind === 'user' && isInjected(classified.text)) kind = 'context';
     if (kind !== 'context') {
-      turn.messages.set(`${kind}:${classified.text}`, { kind, text: classified.text });
+      if (kind !== 'collaboration') turn.messages.set(`${kind}:${classified.text}`, { kind, text: classified.text });
       if (kind === 'user' && (!turn.summary.prompt || (classified.eventPrompt && !turn.hasEventPrompt))) {
         turn.summary.prompt = classified.text.slice(0, 1000);
       }
@@ -337,6 +350,30 @@ async function getState(filePath: string): Promise<CachedIndex> {
 export async function indexSessionFile(filePath: string): Promise<IndexedSession> {
   const state = await getState(filePath);
   return state.index!;
+}
+
+export async function loadSessionRequests(filePath: string): Promise<RequestUsage[]> {
+  const state = await getState(filePath);
+  return state.ledger.requestsInOrder();
+}
+
+export async function loadSessionActivity(filePath: string): Promise<SessionActivity> {
+  const state = await getState(filePath);
+  const requests = state.ledger.requestsInOrder();
+  const warnings: string[] = [];
+  const compactions = state.compactions.map(({ offset, turnId, ...marker }) => ({
+    ...marker, ...(turnId && state.turns.has(turnId) ? { turnId } : {}),
+    beforeRequestIndex: state.ledger.countRequestsBefore(offset),
+  }));
+  if (requests.some(request => request.source === 'snapshot-delta')) warnings.push('部分用量来自累计快照差值，可能覆盖多个缺失调用；图中记录数不一定等于实际调用数。');
+  if (!requests.length) warnings.push('日志未记录可识别的模型调用用量，无法还原 token 变化。');
+  if (compactions.some(marker => !marker.turnId)) warnings.push('部分压缩事件没有可确认的轮次归属，仍按原始日志顺序显示。');
+  if (state.parseErrors) warnings.push(`跳过 ${state.parseErrors} 条损坏的日志记录，活动时间轴可能不完整。`);
+  if (state.partialTail) warnings.push('日志末尾尚未写完，补齐后会自动更新。');
+  if (typeof state.meta.subagent_history_start_ordinal === 'number') warnings.push('子会话的继承重放前缀已排除，仅显示其自身记录的活动。');
+  if (requests.some(request => !request.timestamp) || compactions.some(marker => !marker.timestamp)
+    || state.activityMessages.some(message => !message.timestamp)) warnings.push('部分记录没有时间戳，显示顺序以日志记录顺序为准。');
+  return { requests, compactions, messages: state.activityMessages.slice(), warnings };
 }
 
 function toolCategory(name: string): ToolCall['category'] {

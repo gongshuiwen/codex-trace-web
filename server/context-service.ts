@@ -1,8 +1,10 @@
 import { Worker } from 'node:worker_threads';
-import type { RequestContextAnalysis, RequestUsage } from '../shared/types.js';
+import type { ContextCategory, ContextSourcePage, RequestContextAnalysis, RequestContextComparison, RequestUsage } from '../shared/types.js';
+
+type ContextResult = RequestContextAnalysis | ContextSourcePage | RequestContextComparison;
 
 interface PendingAnalysis {
-  resolve(value: RequestContextAnalysis): void;
+  resolve(value: ContextResult): void;
   reject(error: Error): void;
   timer: NodeJS.Timeout;
 }
@@ -21,7 +23,7 @@ export class ContextAnalysisService {
       ? new Worker(`require('tsx/esm/api').register(); import(${JSON.stringify(workerUrl.href)});`, { eval: true })
       : new Worker(workerUrl);
     this.worker = worker;
-    worker.on('message', (message: { id: number; result?: RequestContextAnalysis; error?: string }) => {
+    worker.on('message', (message: { id: number; result?: ContextResult; error?: string }) => {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       clearTimeout(pending.timer);
@@ -44,18 +46,31 @@ export class ContextAnalysisService {
   }
 
   analyze(file: string, request: RequestUsage): Promise<RequestContextAnalysis> {
+    return this.send('analyze', file, request);
+  }
+
+  sources(file: string, request: RequestUsage, category: ContextCategory, offset: number, limit: number): Promise<ContextSourcePage> {
+    return this.send('sources', file, request, { category, offset, limit });
+  }
+
+  comparison(file: string, request: RequestUsage): Promise<RequestContextComparison> {
+    return this.send('comparison', file, request);
+  }
+
+  private send<T extends ContextResult>(operation: 'analyze' | 'sources' | 'comparison', file: string, request: RequestUsage,
+    extra: { category?: ContextCategory; offset?: number; limit?: number } = {}): Promise<T> {
     if (this.pending.size >= 8) return Promise.reject(Object.assign(new Error('正在分析多个调用，请稍后重试。'), { statusCode: 429 }));
     const worker = this.getWorker();
     const id = ++this.nextId;
-    return new Promise((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(Object.assign(new Error('上下文分析超时，请稍后重试。'), { statusCode: 504 }));
         // A pathological record must not keep all future analyses queued forever.
         this.stop();
       }, 60000);
-      this.pending.set(id, { resolve, reject, timer });
-      worker.postMessage({ id, file, request });
+      this.pending.set(id, { resolve: value => resolve(value as T), reject, timer });
+      worker.postMessage({ id, operation, file, request, ...extra });
     });
   }
 

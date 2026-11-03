@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+.workspace-content{position:relative;flex:1;min-height:0}.workspace-content>.timeline-viewport{position:absolute;inset:0}.workspace-content>.session-overview{height:100%}
+
+.timeline-view-buttons{gap:4px!important;flex-wrap:wrap}.timeline-view-buttons button{border:0;background:transparent;color:var(--muted);padding:7px 9px;border-radius:5px;font-size:11px;white-space:nowrap}.timeline-view-buttons button[aria-pressed="true"]{color:var(--accent-strong);background:var(--accent-light)}.timeline-view-buttons button:hover{background:var(--hover)}.session-overview{flex:1;min-height:0;overflow:auto;padding:24px 40px;scrollbar-width:thin}.request-card.selected-request>summary{background:var(--accent-light);border-radius:5px}
+@media(max-width:600px){.timeline-toolbar{height:auto!important;min-height:48px;flex-wrap:wrap;padding:6px 14px!important;gap:4px}.timeline-view-buttons button{padding:7px;font-size:11px}.session-overview{padding:18px}}
+
 @theme {
   --font-sans: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "Cascadia Code", "Consolas", monospace;

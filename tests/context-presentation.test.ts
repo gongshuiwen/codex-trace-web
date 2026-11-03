@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { ContextComponent } from '../shared/types';
-import { contextRow, signedContextTokens } from '../client/context-presentation';
+import { contextRow, signedContextTokens, signedTokenDelta } from '../client/context-presentation';
 
 const component: ContextComponent = { id: 'toolOutputs', label: '工具输出', tokens: 250, status: 'estimated', method: 'tokenized', items: 1, note: '可见输出' };
 
 describe('context estimate presentation', () => {
+  it('distinguishes unknown comparison from zero and marks estimated differences', () => {
+    expect(signedTokenDelta(null)).toBe('无法比较');
+    expect(signedTokenDelta(0)).toBe('0');
+    expect(signedTokenDelta(1500)).toBe('+1,500');
+    expect(signedTokenDelta(-500, true)).toBe('≈ -500');
+  });
   it('keeps unknown values distinct from a measured zero', () => {
     expect(contextRow({ ...component, tokens: null, status: 'unavailable', method: 'none' }, 1000)).toMatchObject({ value: '未知', state: '无法统计', percent: null });
     expect(contextRow({ ...component, tokens: 0 }, 1000)).toMatchObject({ value: '≈ 0', percent: 0, percentLabel: '0.0%' });

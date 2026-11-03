@@ -4,6 +4,7 @@ import type { ContextComponent, RequestContextAnalysis, RequestUsage } from '../
 import { api, errorMessage, isAbort, sessionPath } from './api';
 import { exactTokens } from './format';
 import { contextRow, signedContextTokens } from './context-presentation';
+import { ContextSources } from './ContextSources';
 import './context-analysis.css';
 
 const cache = new Map<string, RequestContextAnalysis>();
@@ -15,31 +16,34 @@ function cacheAnalysis(key: string, result: RequestContextAnalysis) {
   while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
 }
 
-function ComponentRow({ component, inputTokens }: { component: ContextComponent; inputTokens: number }) {
+function ComponentRow({ component, inputTokens, sessionId, request, onNavigateTurn }: { component: ContextComponent; inputTokens: number; sessionId: string; request: RequestUsage; onNavigateTurn: (turnId: string) => void }) {
+  const [open, setOpen] = useState(false);
   const row = contextRow(component, inputTokens);
-  return <div className={`context-component context-component-${component.id}`}>
-    <div className="context-component-heading"><strong>{component.label}</strong><span className={`context-estimate-state ${component.status}`}>{row.state}</span><span className="context-component-value">{row.value}</span></div>
+  return <details className={`context-component context-component-${component.id}`} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary aria-label={`${component.label}来源明细，${row.state}，${row.value}`}><span className="context-component-heading"><ChevronRight size={12} /><strong>{component.label}</strong><span className={`context-estimate-state ${component.status}`}>{row.state}</span><span className="context-component-value">{row.value}</span></span>
     {row.percent != null && <div className="context-ratio"><div className="context-meter-scroll"><div className="context-meter-track" aria-label={`${component.label}估算为记录输入的${row.percentLabel}${row.percent > 100 ? '，横条视觉上限为100%' : ''}`}><span style={{ width: `${Math.min(100, Math.max(0, row.percent))}%` }} /></div></div><span className={row.percent > 100 ? 'context-excess' : ''}>{row.percentLabel}</span></div>}
-    <p className="context-component-note">{component.note}{component.method === 'sampled' && <span className="context-sampled-tag">抽样外推</span>}</p>
-  </div>;
+    <span className="context-component-note">{component.note}{component.method === 'sampled' && <span className="context-sampled-tag">抽样外推</span>}</span></summary>
+    {open && <ContextSources sessionId={sessionId} request={request} category={component.id} onNavigateTurn={onNavigateTurn} />}
+  </details>;
 }
 
-export function RequestContext({ sessionId, request, revision }: { sessionId: string; request: RequestUsage; revision: string }) {
-  const key = `${sessionId}\u0000${request.id}\u0000${request.turnId}\u0000${revision}`;
-  const [state, setState] = useState<{ key: string; data?: RequestContextAnalysis; error?: string }>(() => ({ key, data: cache.get(key) }));
+export function RequestContext({ sessionId, request, revision, onNavigateTurn }: { sessionId: string; request: RequestUsage; revision: string; onNavigateTurn: (turnId: string) => void }) {
+  const identity = `${sessionId}\u0000${request.id}\u0000${request.turnId}`;
+  const key = `${identity}\u0000${revision}`;
+  const [state, setState] = useState<{ identity: string; data?: RequestContextAnalysis; error?: string }>(() => ({ identity, data: cache.get(key) }));
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     const existing = cache.get(key);
-    if (existing) { setState({ key, data: existing }); return; }
+    if (existing) { setState({ identity, data: existing }); return; }
     const controller = new AbortController();
-    setState({ key });
+    setState(previous => ({ identity, data: previous.identity === identity ? previous.data : undefined }));
     api<RequestContextAnalysis>(`${sessionPath(sessionId)}/requests/${encodeURIComponent(request.id)}/context?turnId=${encodeURIComponent(request.turnId)}`, { signal: controller.signal }).then(result => {
-      if (!controller.signal.aborted) { cacheAnalysis(key, result); setState({ key, data: result }); }
-    }).catch(cause => { if (!controller.signal.aborted && !isAbort(cause)) setState({ key, error: errorMessage(cause) }); });
+      if (!controller.signal.aborted) { cacheAnalysis(key, result); setState({ identity, data: result }); }
+    }).catch(cause => { if (!controller.signal.aborted && !isAbort(cause)) setState(previous => ({ identity, data: previous.identity === identity ? previous.data : undefined, error: errorMessage(cause) })); });
     return () => controller.abort();
-  }, [key, sessionId, request.id, request.turnId, retry]);
-  const data = state.key === key ? state.data : undefined;
-  const error = state.key === key ? state.error : undefined;
+  }, [key, identity, sessionId, request.id, request.turnId, retry]);
+  const data = state.identity === identity ? state.data : undefined;
+  const error = state.identity === identity ? state.error : undefined;
   const unavailable = data?.boundary === 'unavailable';
   return <section className="context-analysis" aria-label="本次模型调用的上下文分析">
     <div className="context-analysis-heading"><span>上下文构成</span><span className="context-estimate-label">文本估算</span></div>
@@ -49,7 +53,7 @@ export function RequestContext({ sessionId, request, revision }: { sessionId: st
     {data && <>
       {unavailable && <div className="context-unavailable"><Info size={14} /><div><strong>无法定位这次调用的上下文边界</strong><p>日志不足以确定哪些文本属于这次模型输入，因此各类均无法统计。上方输入总量仍以用量记录为准。</p></div></div>}
       {!unavailable && <p className="context-intro">下列是日志可见历史候选文本的估算，无法确认它们全部被送入本次输入。各行独立对比记录输入量，未知项不表示 0；横条不构成完整输入分区。</p>}
-      <div className="context-components">{data.components.map(component => <ComponentRow key={component.id} component={unavailable ? { ...component, tokens: null, status: 'unavailable', method: 'none', note: component.note || '无法定位调用边界，不能确定此类内容是否属于本次输入。' } : component} inputTokens={request.usage.inputTokens} />)}</div>
+      <div className="context-components">{data.components.map(component => <ComponentRow key={component.id} component={unavailable ? { ...component, tokens: null, status: 'unavailable', method: 'none', note: component.note || '无法定位调用边界，不能确定此类内容是否属于本次输入。' } : component} inputTokens={request.usage.inputTokens} sessionId={sessionId} request={request} onNavigateTurn={onNavigateTurn} />)}</div>
       {!unavailable && <>
         <dl className="context-reconciliation"><div><dt>可见文本估算合计</dt><dd>{data.estimatedTotalTokens == null ? '未知' : `≈ ${exactTokens(data.estimatedTotalTokens)}`}</dd></div><div className={data.unattributedTokens != null && data.unattributedTokens < 0 ? 'context-excess' : ''}><dt>未归属对账差额</dt><dd>{signedContextTokens(data.unattributedTokens)}</dd></div></dl>
         {data.excessTokens > 0 && <div className="context-overflow-warning"><AlertTriangle size={14} /><span>估算合计超出日志输入 <strong>{exactTokens(data.excessTokens)}</strong> tokens。估算未归一化，不能视为精确组成。</span></div>}

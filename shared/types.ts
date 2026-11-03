@@ -17,6 +17,13 @@ export interface RequestUsage {
   contextWindow?: number;
 }
 
+export interface SessionActivity {
+  requests: RequestUsage[];
+  compactions: { id: string; turnId?: string; timestamp: string; beforeRequestIndex: number }[];
+  messages: { id: string; turnId: string; timestamp: string; messageType: 'MESSAGE' | 'FINAL_ANSWER'; sender: string; taskName: string; preview: string }[];
+  warnings: string[];
+}
+
 export type ContextCategory = 'userMessages' | 'projectInstructions' | 'skills' | 'toolDefinitions' | 'toolOutputs' | 'other';
 
 export interface ContextComponent {
@@ -39,6 +46,53 @@ export interface RequestContextAnalysis {
   estimatedTotalTokens: number | null;
   unattributedTokens: number | null;
   excessTokens: number;
+  warnings: string[];
+}
+
+export interface ContextSource {
+  id: string;
+  category: ContextCategory;
+  turnId?: string;
+  eventId?: string;
+  label: string;
+  role?: string;
+  estimatedTokens: number;
+  method: 'tokenized' | 'sampled';
+  partial: boolean;
+  note: string;
+  excerpt: string;
+}
+
+export interface ContextSourcePage {
+  requestId: string;
+  category: ContextCategory;
+  sources: ContextSource[];
+  total: number;
+  nextOffset: number | null;
+  boundary: RequestContextAnalysis['boundary'];
+  scope: RequestContextAnalysis['scope'];
+  warnings: string[];
+}
+
+export interface RequestContextComparison {
+  current: RequestUsage;
+  previous: RequestUsage | null;
+  comparable: boolean;
+  components: {
+    id: ContextCategory;
+    label: string;
+    currentTokens: number | null;
+    previousTokens: number | null;
+    deltaTokens: number | null;
+  }[];
+  changes: {
+    added: number;
+    removed: number;
+    changed: number;
+    addedSources: ContextSource[];
+    removedSources: ContextSource[];
+    changedSources: ContextSource[];
+  };
   warnings: string[];
 }
 

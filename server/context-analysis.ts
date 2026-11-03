@@ -3,19 +3,23 @@ import { open, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { getEncoding } from 'js-tiktoken';
-import type { ContextCategory, ContextComponent, RequestContextAnalysis, RequestUsage } from '../shared/types.js';
+import type { ContextCategory, ContextComponent, ContextSource, ContextSourcePage, RequestContextAnalysis, RequestContextComparison, RequestUsage } from '../shared/types.js';
 
 type Json = Record<string, any>;
 interface Estimate { tokens: number; sampled: boolean; }
-interface Contribution extends Estimate { category: ContextCategory; partial: boolean; note?: string; }
+interface Contribution extends Estimate { category: ContextCategory; partial: boolean; note?: string; source: ContextSource; contentHash: string; }
+interface SourceOrigin { turnId?: string; eventId?: string; label?: string; role?: string; }
 interface History {
   parts: Contribution[];
   slots: Map<string, Contribution>;
   warnings: Set<string>;
   scope: 'visible-history' | 'since-compaction';
   incomplete: boolean;
+  turnId?: string;
+  sourceSequence: number;
+  compactionOffset: number;
 }
-interface Snapshot { components: ContextComponent[]; scope: History['scope']; warnings: string[]; }
+interface Snapshot { components: ContextComponent[]; scope: History['scope']; warnings: string[]; sources: { source: ContextSource; contentHash: string }[]; compactionOffset: number; }
 interface CacheEntry {
   identity: string;
   size: number;
@@ -43,6 +47,7 @@ const baseNotes: Record<ContextCategory, string> = {
 const COMMON_WARNING = '这些是日志可见候选上下文的文本估算，不是请求原始快照；协议封装、指令替换、历史裁剪和服务端处理可能使其与实测输入不同。';
 const SAMPLE_CAP = 32_768;
 const resultCache = new Map<string, CacheEntry>();
+const sourceCache = new Map<string, { entry: CacheEntry; snapshot: Snapshot }>();
 const estimateCache = new Map<string, Estimate>();
 const inflight = new Map<string, Promise<RequestContextAnalysis>>();
 let encoder: ReturnType<typeof getEncoding> | null = null;
@@ -72,13 +77,23 @@ function countText(text: string): Estimate {
   return estimate;
 }
 
-function addText(history: History, category: ContextCategory, raw: string, slot?: string, partial = false, note?: string): void {
+function addText(history: History, category: ContextCategory, raw: string, slot?: string, partial = false, note?: string, origin: SourceOrigin = {}): void {
   let removedMedia = false;
   const text = raw.replace(/data:(?:image|audio|video|application\/octet-stream)[^,\s]*;base64,[a-z0-9+/=\r\n]+/gi, () => { removedMedia = true; return ''; });
   if (removedMedia) { history.warnings.add('图像、音频或视频编码未按文本计数；多模态输入消耗无法由这些文本估算。'); partial = true; }
   if (!text) return;
   const estimate = countText(text);
-  const contribution: Contribution = { category, ...estimate, partial, ...(note ? { note } : {}) };
+  const sequence = ++history.sourceSequence;
+  const excerpt = text.length > 300 ? `${text.slice(0, 299).replace(/[\uD800-\uDBFF]$/, '')}…` : text;
+  const source: ContextSource = {
+    id: slot ? `slot-${hash(slot).slice(0, 24)}` : `source-${sequence}`,
+    category, ...(origin.turnId || history.turnId ? { turnId: origin.turnId || history.turnId } : {}),
+    ...(origin.eventId ? { eventId: origin.eventId } : {}), ...(origin.role ? { role: origin.role } : {}),
+    label: (origin.label || labels[category]).slice(0, 120), estimatedTokens: estimate.tokens,
+    method: estimate.sampled ? 'sampled' : 'tokenized', partial,
+    note: (note || baseNotes[category]) + (estimate.sampled ? ' 超长来源按约 32K 字符采样外推。' : ''), excerpt,
+  };
+  const contribution: Contribution = { category, ...estimate, partial, source, contentHash: hash(text), ...(note ? { note } : {}) };
   if (slot) {
     if (history.slots.has(slot)) history.warnings.add('动态指令或工具定义按同类来源的最新可见版本估算，旧版本是否仍作为历史输入无法确认。');
     history.slots.set(slot, contribution);
@@ -103,7 +118,9 @@ function snapshot(history: History): Snapshot {
           + [...new Set(group.map(part => part.note).filter(Boolean))].join(' '),
     };
   });
-  return { components, scope: history.scope, warnings: [COMMON_WARNING, ...history.warnings] };
+  return { components, scope: history.scope, warnings: [COMMON_WARNING, ...history.warnings],
+    sources: parts.map(part => ({ source: { ...part.source, partial: part.partial || history.incomplete }, contentHash: part.contentHash })),
+    compactionOffset: history.compactionOffset };
 }
 
 function finish(requestId: string, inputTokens: number, state: Snapshot | null): RequestContextAnalysis {
@@ -229,19 +246,22 @@ async function sampleHash(filePath: string, end: number, tail: boolean): Promise
   } finally { await handle.close(); }
 }
 
-async function analyze(filePath: string, request: RequestUsage): Promise<RequestContextAnalysis> {
+async function analyze(filePath: string, request: RequestUsage, capture?: (snapshot: Snapshot | null) => void): Promise<RequestContextAnalysis> {
   if (request.source !== 'record') return unavailable(request.id, request.usage.inputTokens, '该条用量来自累计快照差值，可能跨越多个缺失调用，无法定位单次请求的输入上下文。');
   const metadata = await stat(filePath);
   const identity = `${metadata.dev}:${metadata.ino}`;
   const prefix = await sampleHash(filePath, metadata.size, false);
   const key = `${filePath}\0${request.id}\0${request.usage.inputTokens}`;
-  const known = resultCache.get(key);
+  const knownSource = sourceCache.get(key);
+  const known = capture ? knownSource?.entry : resultCache.get(key);
   if (known && known.identity === identity && metadata.size >= known.end && known.prefix === prefix
     && (metadata.size === known.size && metadata.mtimeMs === known.mtime || metadata.size > known.size && await sampleHash(filePath, known.end, true) === known.anchor)) {
     resultCache.delete(key); resultCache.set(key, known);
+    if (capture && knownSource) { sourceCache.delete(key); sourceCache.set(key, knownSource); capture(knownSource.snapshot); }
     return known.analysis;
   }
-  const history: History = { parts: [], slots: new Map(), warnings: new Set(), scope: 'visible-history', incomplete: false };
+  const history: History = { parts: [], slots: new Map(), warnings: new Set(), scope: 'visible-history', incomplete: false,
+    sourceSequence: 0, compactionOffset: 0 };
   let frozen: Snapshot | null = null;
   let ownMeta: Json | null = null;
   let ordinal = 0;
@@ -250,6 +270,7 @@ async function analyze(filePath: string, request: RequestUsage): Promise<Request
   const eventMessages = new Set<string>();
   const seenRecordIds = new Set<string>();
   const toolSources = new Map<string, string>();
+  const toolOrigins = new Map<string, SourceOrigin>();
   const processItem = (payload: Json, recordOffset: number, replacement = false, fromEvent = false) => {
     const itemType = payload.type;
     const generated = payload.role === 'assistant' || ['reasoning', 'function_call', 'custom_tool_call', 'local_shell_call', 'web_search_call', 'image_generation_call'].includes(itemType);
@@ -273,7 +294,8 @@ async function analyze(filePath: string, request: RequestUsage): Promise<Request
           : explicit ? [{ category: explicit, text: part.text }] : kind && kind !== 'unknown'
             ? [{ category: 'other' as ContextCategory, text: part.text }] : fallbackParts(part.text, role);
         for (const piece of classified) addText(history, piece.category, piece.text, sourceSlot(kind, piece.category, role), piece.category === 'toolDefinitions',
-          piece.category === 'toolDefinitions' && /^tools\./.test(kind) ? ' 此项含工具说明，完整模型侧 schema 加载情况无法确认。' : undefined);
+          piece.category === 'toolDefinitions' && /^tools\./.test(kind) ? ' 此项含工具说明，完整模型侧 schema 加载情况无法确认。' : undefined,
+          { ...(!replacement ? { eventId: `event-${recordOffset}` } : {}), role, label: `${labels[piece.category]}${kind ? ` · ${kind}` : role === 'assistant' ? ' · 历史回复' : ''}` });
       }
       if (whole) {
         seenMessages.add(messageKey);
@@ -282,7 +304,10 @@ async function analyze(filePath: string, request: RequestUsage): Promise<Request
     } else if (['function_call', 'custom_tool_call', 'local_shell_call', 'web_search_call', 'image_generation_call'].includes(itemType)) {
       const argumentsText = safeText(payload.arguments ?? payload.input ?? payload.action, history);
       const name = String(payload.name || itemType);
-      addText(history, 'other', `${name}\n${argumentsText}`);
+      const callId = String(payload.call_id || payload.id);
+      const origin = { ...(!replacement ? { eventId: `tool-${recordOffset}` } : {}), label: `工具调用 · ${name}`, role: 'assistant', turnId: history.turnId };
+      toolOrigins.set(callId, origin);
+      addText(history, 'other', `${name}\n${argumentsText}`, undefined, false, undefined, origin);
       // Only a dedicated single-file reader provides enough evidence to move a
       // SKILL.md result out of the tool-output category. Shell/exec scripts do not.
       if (/(?:^|[._])(?:read_file|read_text_file|readfile)$/.test(name)) {
@@ -297,19 +322,24 @@ async function analyze(filePath: string, request: RequestUsage): Promise<Request
       const output = safeText(payload.output, history);
       const skillSource = toolSources.get(callId);
       addText(history, skillSource ? 'skills' : 'toolOutputs', output, skillSource ? `loaded-skill:${skillSource}` : undefined,
-        false, skillSource ? ' 已由专用单文件读取调用确认来源为 SKILL.md。' : undefined);
+        false, skillSource ? ' 已由专用单文件读取调用确认来源为 SKILL.md。' : undefined,
+        { ...toolOrigins.get(callId), eventId: replacement ? undefined : toolOrigins.get(callId)?.eventId || `tool-${recordOffset}`,
+          label: skillSource ? '已读取的 SKILL.md' : (toolOrigins.get(callId)?.label || '工具返回').replace('工具调用', '工具返回'), role: 'tool' });
     } else if (itemType === 'additional_tools') {
       const schemas = Array.isArray(payload.tools) ? payload.tools : [];
       schemas.forEach((schema: Json, index: number) => {
         const name = String(schema.name || schema.function?.name || `anonymous-${recordOffset}-${index}`);
-        addText(history, 'toolDefinitions', safeText(schema, history), `schema:${name}`);
+        addText(history, 'toolDefinitions', safeText(schema, history), `schema:${name}`, false, undefined,
+          { ...(!replacement ? { eventId: `context-${recordOffset}` } : {}), label: `工具定义 · ${name}` });
       });
     } else if (itemType === 'reasoning') {
       const summary = safeText(payload.summary ?? [], history);
-      if (summary) addText(history, 'other', summary, undefined, true, ' 仅有可见推理摘要，未计加密或未记录的推理内容。');
+      if (summary) addText(history, 'other', summary, undefined, true, ' 仅有可见推理摘要，未计加密或未记录的推理内容。',
+        { ...(!replacement ? { eventId: `event-${recordOffset}` } : {}), label: '历史推理摘要', role: 'assistant' });
       if (payload.encrypted_content) history.warnings.add('加密推理编码未按普通文本计数，后续请求是否保留了这些内容无法由日志确定。');
     } else if (itemType === 'agent_message') {
-      addText(history, 'other', safeText(payload.content, history));
+      addText(history, 'other', safeText(payload.content, history), undefined, false, undefined,
+        { ...(!replacement ? { eventId: `event-${recordOffset}` } : {}), label: '代理协作消息', role: 'assistant' });
     }
   };
 
@@ -324,7 +354,7 @@ async function analyze(filePath: string, request: RequestUsage): Promise<Request
       if (!ownMeta) {
         ownMeta = payload;
         const base = typeof payload.base_instructions === 'string' ? payload.base_instructions : payload.base_instructions?.text;
-        if (typeof base === 'string' && base) { baseHash = hash(base); addText(history, 'other', base, 'model.instructions'); }
+        if (typeof base === 'string' && base) { baseHash = hash(base); addText(history, 'other', base, 'model.instructions', false, undefined, { label: '基础指令', role: 'system' }); }
         if (typeof payload.subagent_history_start_ordinal === 'number' && payload.subagent_history_start_ordinal > itemOrdinal + 1) {
           history.incomplete = true;
           history.warnings.add('此子会话包含继承历史；继承重放已排除，模型实际携带的继承上下文无法完整还原。');
@@ -342,12 +372,15 @@ async function analyze(filePath: string, request: RequestUsage): Promise<Request
       history.parts = [];
       history.slots.clear();
       history.scope = 'since-compaction';
+      history.compactionOffset = line.start;
+      history.turnId = undefined;
       history.incomplete = true;
       frozen = null;
       seenMessages.clear();
       eventMessages.clear();
       history.warnings.add('此前发生上下文压缩；旧可见历史已清除，仅估算压缩后明确记录的内容，无法重建完整输入。');
-      if (typeof payload.message === 'string') addText(history, 'other', payload.message, undefined, true, ' 日志记录的压缩摘要。');
+      if (typeof payload.message === 'string') addText(history, 'other', payload.message, undefined, true, ' 日志记录的压缩摘要。',
+        { eventId: `notice-${line.start}`, label: '压缩摘要' });
       const replacement = payload.replacement_history ?? raw.replacement_history;
       if (Array.isArray(replacement)) replacement.forEach(item => {
         if (item && typeof item === 'object') processItem(item.payload && typeof item.payload === 'object' ? item.payload : item, line.start, true);
@@ -361,18 +394,32 @@ async function analyze(filePath: string, request: RequestUsage): Promise<Request
       const input = typeof payload.usage?.input_tokens === 'number' ? payload.usage.input_tokens : id === request.id ? request.usage.inputTokens : 0;
       const analysis = finish(id, input, frozen);
       const analysisKey = `${filePath}\0${id}\0${input}`;
-      resultCache.set(analysisKey, { identity, size: metadata.size, mtime: metadata.mtimeMs, prefix, end: line.end,
-        anchor: await sampleHash(filePath, line.end, true), analysis });
+      const entry = { identity, size: metadata.size, mtime: metadata.mtimeMs, prefix, end: line.end,
+        anchor: await sampleHash(filePath, line.end, true), analysis };
+      resultCache.set(analysisKey, entry);
       trimCache(resultCache, 256);
+      if (id === request.id && capture) {
+        const targetSnapshot = frozen as Snapshot | null;
+        capture(targetSnapshot);
+        if (targetSnapshot && targetSnapshot.sources.length <= 10000) {
+          sourceCache.delete(analysisKey);
+          sourceCache.set(analysisKey, { entry, snapshot: targetSnapshot });
+          while (sourceCache.size > 8 || [...sourceCache.values()].reduce((sum, value) => sum + value.snapshot.sources.length, 0) > 20000) {
+            sourceCache.delete(sourceCache.keys().next().value!);
+          }
+        }
+      }
       frozen = null;
       if (id === request.id) return analysis;
       continue;
     }
     if (type === 'response_item') { processItem(payload, line.start); continue; }
     if (type === 'event_msg' && payload.type === 'task_started') {
+      history.turnId = typeof payload.turn_id === 'string' ? payload.turn_id : undefined;
       seenMessages.clear();
       eventMessages.clear();
     }
+    if (type === 'turn_context' && typeof payload.turn_id === 'string') history.turnId = payload.turn_id;
     if (['message', 'function_call', 'custom_tool_call', 'function_call_output', 'custom_tool_call_output', 'reasoning'].includes(type)) {
       processItem({ ...payload, type }, line.start); continue;
     }
@@ -395,4 +442,57 @@ export async function analyzeRequestContext(filePath: string, request: RequestUs
   const task = analyze(resolved, request);
   inflight.set(key, task);
   try { return await task; } finally { inflight.delete(key); }
+}
+
+async function detailedContext(filePath: string, request: RequestUsage): Promise<{ analysis: RequestContextAnalysis; snapshot: Snapshot | null }> {
+  let captured: Snapshot | null = null;
+  const analysis = await analyze(path.resolve(filePath), request, value => { captured = value; });
+  return { analysis, snapshot: captured };
+}
+
+/** Explicitly requested excerpts only; the existing numeric endpoint stays text-free. */
+export async function loadContextSources(filePath: string, request: RequestUsage, category: ContextCategory, offset = 0, limit = 20): Promise<ContextSourcePage> {
+  const { analysis, snapshot } = await detailedContext(filePath, request);
+  const sources = snapshot?.sources.filter(item => item.source.category === category).map(item => item.source) || [];
+  const from = Math.max(0, Math.floor(offset));
+  const count = Math.min(50, Math.max(1, Math.floor(limit)));
+  const page = sources.slice(from, from + count);
+  return {
+    requestId: request.id, category, sources: page, total: sources.length,
+    nextOffset: from + page.length < sources.length ? from + page.length : null,
+    boundary: analysis.boundary, scope: analysis.scope, warnings: analysis.warnings,
+  };
+}
+
+export async function compareRequestContext(filePath: string, current: RequestUsage, previous: RequestUsage | null): Promise<RequestContextComparison> {
+  const now = await detailedContext(filePath, current);
+  const before = previous ? await detailedContext(filePath, previous) : null;
+  const comparable = !!(previous && now.snapshot && before?.snapshot && now.snapshot.compactionOffset === before.snapshot.compactionOffset);
+  const warnings = new Set<string>([...now.analysis.warnings, ...(before?.analysis.warnings || [])]);
+  if (!previous) warnings.add('这是此会话中的第一条已记录模型调用，没有前一次调用可供对比。');
+  else if (!now.snapshot || !before?.snapshot) warnings.add('至少一条调用缺少可恢复的输入边界；保留原始用量，不比较候选上下文变化。');
+  else if (!comparable) warnings.add('两次调用之间发生了上下文压缩，候选来源范围已改变，不能直接计算分类或来源增减。');
+  const components = categories.map(id => {
+    const currentTokens = now.analysis.components.find(item => item.id === id)?.tokens ?? null;
+    const previousTokens = before?.analysis.components.find(item => item.id === id)?.tokens ?? null;
+    return { id, label: labels[id], currentTokens, previousTokens,
+      deltaTokens: comparable && currentTokens !== null && previousTokens !== null ? currentTokens - previousTokens : null };
+  });
+  const added: ContextSource[] = [];
+  const removed: ContextSource[] = [];
+  const changed: ContextSource[] = [];
+  if (comparable) {
+    const old = new Map(before!.snapshot!.sources.map(item => [item.source.id, item]));
+    const latest = new Map(now.snapshot!.sources.map(item => [item.source.id, item]));
+    for (const [id, item] of latest) {
+      const previousSource = old.get(id);
+      if (!previousSource) added.push(item.source);
+      else if (previousSource.contentHash !== item.contentHash || previousSource.source.category !== item.source.category) changed.push(item.source);
+    }
+    for (const [id, item] of old) if (!latest.has(id)) removed.push(item.source);
+  }
+  return { current, previous, comparable, components,
+    changes: { added: added.length, removed: removed.length, changed: changed.length,
+      addedSources: added.slice(0, 5), removedSources: removed.slice(0, 5), changedSources: changed.slice(0, 5) },
+    warnings: [...warnings] };
 }

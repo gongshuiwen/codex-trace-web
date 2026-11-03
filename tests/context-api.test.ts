@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { createApp } from '../server/app.js';
 import { IndexService } from '../server/indexer.js';
-import type { ContextCategory, RequestContextAnalysis, TurnDetail } from '../shared/types.js';
+import type { ContextCategory, ContextSourcePage, RequestContextAnalysis, RequestContextComparison, TurnDetail } from '../shared/types.js';
 
 const resources: { root: string; app: FastifyInstance; index: IndexService }[] = [];
 const secretPrompt = 'USER_PRIVATE_SENTINEL_7b0cf';
@@ -90,6 +90,42 @@ afterEach(async () => {
 });
 
 describe('per-request context analysis API', () => {
+  it('returns bounded provenance and compares with the prior same-session request, including cross-turn calls', async () => {
+    const rows = twoRequests();
+    rows.push(record('event_msg', { type: 'task_started', turn_id: 'other-turn' }, 10));
+    rows.push(message('user', '下一轮自己的问题', 11));
+    rows.push(message('assistant', '下一轮回复', 12, 'final_answer'));
+    rows.push(record('token_usage_record', { response_id: 'other-request', turn_id: 'other-turn', usage: { input_tokens: 3000, output_tokens: 10, total_tokens: 3010 } }, 13));
+    rows.push(record('event_msg', { type: 'task_complete', turn_id: 'other-turn' }, 14));
+    const { app } = await fixture(rows);
+    const base = `/api/sessions/${sessionId}/requests/context-response-two/context/sources?turnId=${turnId}&category=toolOutputs`;
+    const response = await app.inject(base);
+    expect(response.statusCode).toBe(200);
+    const sources = response.json<ContextSourcePage>();
+    expect(sources.sources).toHaveLength(1);
+    expect(sources.sources[0].excerpt).toContain(previousToolResult);
+    expect(sources.sources[0].excerpt.length).toBeLessThanOrEqual(300);
+    expect(JSON.stringify(sources)).not.toContain(currentToolResult);
+    expect((await app.inject(base + '&limit=51')).statusCode).toBe(400);
+    expect((await app.inject(base + '&offset=-1')).statusCode).toBe(400);
+    expect((await app.inject(base.replace('category=toolOutputs', 'category=invalid'))).statusCode).toBe(400);
+    expect((await app.inject(base.replace('context-response-two', 'missing'))).statusCode).toBe(404);
+    const first = (await app.inject(`/api/sessions/${sessionId}/requests/context-response-one/comparison?turnId=${turnId}`)).json<RequestContextComparison>();
+    expect(first.previous).toBeNull();
+    const sameTurn = (await app.inject(`/api/sessions/${sessionId}/requests/context-response-two/comparison?turnId=${turnId}`)).json<RequestContextComparison>();
+    expect(sameTurn.previous?.id).toBe('context-response-one');
+    expect(sameTurn.comparable).toBe(true);
+    const crossTurnResponse = await app.inject(`/api/sessions/${sessionId}/requests/other-request/comparison?turnId=other-turn`);
+    expect(crossTurnResponse.statusCode).toBe(200);
+    const crossTurn = crossTurnResponse.json<RequestContextComparison>();
+    expect(crossTurn.previous?.id).toBe('context-response-two');
+    expect(crossTurn.previous?.turnId).toBe(turnId);
+    expect(crossTurn.current.turnId).toBe('other-turn');
+    expect(crossTurn.comparable).toBe(true);
+    expect((await app.inject(`/api/sessions/${sessionId}/requests/context-response-one/comparison?turnId=other-turn`)).statusCode).toBe(404);
+    expect(JSON.stringify(await analysis(app, 'context-response-two'))).not.toContain(previousToolResult);
+  }, 20000);
+
   it('uses each request input boundary and only attributes previous tool output to the next request', async () => {
     const { app } = await fixture(twoRequests());
     const first = await analysis(app, 'context-response-one');

@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { access, realpath, stat } from 'node:fs/promises';
-import type { AppSettings, LiveEvent } from '../shared/types.js';
+import type { AppSettings, ContextCategory, LiveEvent } from '../shared/types.js';
 import type { IndexService } from './indexer.js';
 import { loadTurnDetail, loadToolOutput } from './parser.js';
 import { ContextAnalysisService } from './context-service.js';
@@ -64,6 +64,18 @@ export async function createApp(options: AppOptions) {
     }
   }
 
+  async function contextRequest(id: string, turnId: string, requestId: string) {
+    const file = await sessionPath(id);
+    const session = await index.get(id);
+    if (!session?.turns.some(turn => turn.id === turnId)) {
+      throw Object.assign(new Error('未找到此轮次。'), { statusCode: 404 });
+    }
+    const turn = await loadTurnDetail(file, turnId);
+    const modelRequest = turn.requests.find(item => item.id === requestId);
+    if (!modelRequest) throw Object.assign(new Error('未找到此轮次中的模型调用。'), { statusCode: 404 });
+    return { file, modelRequest };
+  }
+
   app.get('/api/health', async () => ({ ok: true, progress: index.progress }));
   app.get('/api/settings', async () => settings);
   app.put<{ Body: { sessionsDir: string } }>('/api/settings', {
@@ -110,6 +122,12 @@ export async function createApp(options: AppOptions) {
     return detail;
   });
 
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/activity', async request => {
+    const activity = await index.activity(request.params.id);
+    if (!activity) throw Object.assign(new Error('未找到此会话活动，日志可能已被移动或删除。'), { statusCode: 404 });
+    return activity;
+  });
+
   app.get<{ Params: { id: string; turnId: string } }>('/api/sessions/:id/turns/:turnId', async (request) => {
     const file = await sessionPath(request.params.id);
     return loadTurnDetail(file, request.params.turnId);
@@ -121,15 +139,33 @@ export async function createApp(options: AppOptions) {
         turnId: { type: 'string', minLength: 1, maxLength: 256 },
       } } },
     }, async (request) => {
-      const file = await sessionPath(request.params.id);
-      const session = await index.get(request.params.id);
-      if (!session?.turns.some(turn => turn.id === request.query.turnId)) {
-        throw Object.assign(new Error('未找到此轮次。'), { statusCode: 404 });
-      }
-      const turn = await loadTurnDetail(file, request.query.turnId);
-      const modelRequest = turn.requests.find(item => item.id === request.params.requestId);
-      if (!modelRequest) throw Object.assign(new Error('未找到此轮次中的模型调用。'), { statusCode: 404 });
+      const { file, modelRequest } = await contextRequest(request.params.id, request.query.turnId, request.params.requestId);
       return contextAnalysis.analyze(file, modelRequest);
+    },
+  );
+
+  app.get<{ Params: { id: string; requestId: string }; Querystring: { turnId: string; category: ContextCategory; offset?: number; limit?: number } }>(
+    '/api/sessions/:id/requests/:requestId/context/sources', {
+      schema: { querystring: { type: 'object', required: ['turnId', 'category'], additionalProperties: false, properties: {
+        turnId: { type: 'string', minLength: 1, maxLength: 256 },
+        category: { type: 'string', enum: ['userMessages', 'projectInstructions', 'skills', 'toolDefinitions', 'toolOutputs', 'other'] },
+        offset: { type: 'integer', minimum: 0, maximum: 10000000, default: 0 },
+        limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+      } } },
+    }, async request => {
+      const { file, modelRequest } = await contextRequest(request.params.id, request.query.turnId, request.params.requestId);
+      return contextAnalysis.sources(file, modelRequest, request.query.category, request.query.offset ?? 0, request.query.limit ?? 20);
+    },
+  );
+
+  app.get<{ Params: { id: string; requestId: string }; Querystring: { turnId: string } }>(
+    '/api/sessions/:id/requests/:requestId/comparison', {
+      schema: { querystring: { type: 'object', required: ['turnId'], additionalProperties: false, properties: {
+        turnId: { type: 'string', minLength: 1, maxLength: 256 },
+      } } },
+    }, async request => {
+      const { file, modelRequest } = await contextRequest(request.params.id, request.query.turnId, request.params.requestId);
+      return contextAnalysis.comparison(file, modelRequest);
     },
   );
 

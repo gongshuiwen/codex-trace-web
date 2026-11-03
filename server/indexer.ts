@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { Worker } from 'node:worker_threads';
 import { access, mkdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { IndexProgress, LiveEvent, SessionDetail, SessionList } from '../shared/types.js';
+import type { IndexProgress, LiveEvent, SessionActivity, SessionDetail, SessionList } from '../shared/types.js';
 import type { ListOptions } from './store.js';
 
 interface WorkerMessage {
@@ -123,6 +123,7 @@ export class IndexService extends EventEmitter {
   list(options: ListOptions = {}): Promise<SessionList> { return this.request('list', [options]); }
   get(id: string): Promise<SessionDetail | null> { return this.request('get', [id]); }
   getPath(id: string): Promise<string | null> { return this.request('getPath', [id]); }
+  activity(id: string): Promise<SessionActivity | null> { return this.request('activity', [id]); }
 
   async setDirectory(directory: string): Promise<void> {
     const resolved = await realpath(directory);

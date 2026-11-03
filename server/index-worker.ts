@@ -5,7 +5,7 @@ import path from 'node:path';
 import { setImmediate as yieldToWorker } from 'node:timers/promises';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { SessionStore, INDEX_SCHEMA_VERSION, type ListOptions } from './store.js';
-import { indexSessionFile } from './parser.js';
+import { indexSessionFile, loadSessionActivity } from './parser.js';
 import type { IndexProgress, LiveEvent } from '../shared/types.js';
 
 const port = parentPort;
@@ -184,6 +184,11 @@ port.on('message', async (message: { id?: number; method: string; args: unknown[
       case 'list': result = store.list((message.args[0] || {}) as ListOptions, { ...progress }); break;
       case 'get': result = store.get(String(message.args[0])); break;
       case 'getPath': result = await safePath(String(message.args[0])); break;
+      case 'activity': {
+        const file = await safePath(String(message.args[0]));
+        result = file ? await loadSessionActivity(file) : null;
+        break;
+      }
       default: throw new Error('未知索引操作。');
     }
     port!.postMessage({ type: 'response', id: message.id, result });

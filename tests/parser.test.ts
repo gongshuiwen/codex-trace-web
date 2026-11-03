@@ -2,7 +2,7 @@ import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { indexSessionFile, loadToolOutput, loadTurnDetail } from '../server/parser.js';
+import { indexSessionFile, loadSessionRequests, loadToolOutput, loadTurnDetail } from '../server/parser.js';
 
 const directories: string[] = [];
 const stamp = '2026-01-01T00:00:00.000Z';
@@ -23,6 +23,15 @@ async function file(lines: string[], trailing = '\n'): Promise<string> {
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))); });
 
 describe('Codex rollout parser', () => {
+  it('returns deduplicated cross-turn requests in file order even with identical or backward timestamps', async () => {
+    const usage = { input_tokens: 100, output_tokens: 10, total_tokens: 110 };
+    const location = await file([meta(), start(), message('user', 'first'),
+      line('token_usage_record', { response_id: 'r1', turn_id: 't1', usage }),
+      line('token_usage_record', { response_id: 'r2', turn_id: 't1', usage }), end(), start('t2'),
+      line('token_usage_record', { response_id: 'r3', turn_id: 't2', usage }, '2025-12-31T23:59:59Z'),
+      line('token_usage_record', { response_id: 'r1', turn_id: 't1', usage }), end('t2')]);
+    expect((await loadSessionRequests(location)).map(request => [request.id, request.turnId])).toEqual([['r1', 't1'], ['r2', 't1'], ['r3', 't2']]);
+  });
   it('indexes Desktop prompts separately from injected context and parses custom tool calls', async () => {
     const location = await file([meta(), start(), message('developer', 'Developer instructions'), message('user', '<environment_context>private context</environment_context>'),
       message('user', '请解释这段代码 🐶'), line('turn_context', { turn_id: 't1', model: 'test-model', cwd: 'E:\\work\\demo' }),
