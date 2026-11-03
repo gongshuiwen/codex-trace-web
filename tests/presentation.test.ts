@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import type { TimelineEvent } from '../shared/types';
 import { turnPresentation } from '../client/presentation';
+import { sessionDisplayName, sessionTooltip } from '../client/format';
+import type { SessionSummary } from '../shared/types';
 
 function event(id: string, kind: TimelineEvent['kind'], text: string): TimelineEvent {
   return { id, kind, text, timestamp: '2026-11-02T01:30:00Z' };
 }
 
 describe('turn presentation', () => {
+  it('shows the recorded agent name separately from the conversation title', () => {
+    const session = { agentName: '/root/review_worker', agentNickname: 'TestAlias', title: 'Original task title', project: 'demo', cwd: '/demo' } as SessionSummary;
+    expect(sessionDisplayName(session)).toBe('review_worker');
+    expect(sessionTooltip(session)).toContain('/root/review_worker\nTestAlias\nOriginal task title');
+    expect(sessionDisplayName({ ...session, agentName: undefined })).toBe('Original task title');
+    expect(sessionDisplayName({ ...session, agentName: 'Writer/Editor' })).toBe('Writer/Editor');
+  });
+
   it('uses the full first user message and preserves later user messages in stream order', () => {
     const fullPrompt = '完整用户请求'.repeat(500) + '请求末尾不得丢失';
     const entries = [

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ChevronDown, ChevronRight, Circle, Folder, GitBranch, Layers3, Search, Settings2, X } from 'lucide-react';
 import type { SessionChildrenPage, SessionList, SessionSummary } from '../shared/types';
-import { clock, dateGroup, tokens } from './format';
+import { clock, dateGroup, sessionDisplayName, sessionTooltip, tokens } from './format';
 import { api, errorMessage, sessionPath } from './api';
 import { mergeSessions, sessionAncestors, sidebarSessionTree, type SessionTreeNode } from './session-tree';
 import './Sidebar.css';
@@ -130,7 +130,7 @@ export function Sidebar({ data, selectedId, query, project, loading, error, onQu
     const open = expanded.has(session.id);
     const branch = branches.get(session.id);
     const count = filtering ? node.children.length : session.childCount ?? Math.max(node.children.length, branch?.total ?? 0);
-    const name = session.title || session.project || '未命名会话';
+    const name = sessionDisplayName(session);
     const childrenId = `session-children-${encodeURIComponent(session.id)}`;
     return <li key={session.id}>
       <div className="session-tree-row">
@@ -139,7 +139,7 @@ export function Sidebar({ data, selectedId, query, project, loading, error, onQu
           next.has(session.id) ? next.delete(session.id) : next.add(session.id);
           return next;
         })}>{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button> : <span className="session-tree-spacer" />}
-        <button className={`session-item ${selectedId === session.id ? 'selected' : ''}`} data-session-id={session.id} ref={selectedId === session.id ? selectedButton : undefined} onClick={() => onSelect(session)} title={`${session.title}\n${session.cwd}`} aria-current={selectedId === session.id ? 'page' : undefined}>
+        <button className={`session-item ${selectedId === session.id ? 'selected' : ''}`} data-session-id={session.id} ref={selectedId === session.id ? selectedButton : undefined} onClick={() => onSelect(session)} title={sessionTooltip(session)} aria-current={selectedId === session.id ? 'page' : undefined}>
           <div className="session-title">{session.parentId && <GitBranch size={12} />}<span>{name}</span>{filtering && !matchIds.has(session.id) && <small className="session-parent-label">父级</small>}{count > 0 && <small className="session-child-count" title={`${count} 个${filtering ? '当前结果中的' : '直接'}子会话`}>{count}</small>}{session.status === 'running' && <Circle size={7} className="running-dot" fill="currentColor" />}</div>
           <div className="session-preview">{session.match?.excerpt || session.cwd || '工作目录未记录'}</div>
           <div className="session-meta"><span>{session.project || session.source || 'Codex'}</span><span>{tokens(session.usage.tokens?.totalTokens)} tok</span><time title={session.startedAt}>{clock(session.startedAt)}</time></div>

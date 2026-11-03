@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { IndexService } from '../server/indexer.js';
-import { SessionStore } from '../server/store.js';
+import { INDEX_SCHEMA_VERSION, SessionStore } from '../server/store.js';
 import type { IndexedSession } from '../server/parser-types.js';
 import type { UsageSummary } from '../shared/types.js';
 
@@ -51,6 +51,22 @@ function log(id: string, prompt: string): string {
 }
 
 describe('persistent searchable summaries', () => {
+  test('searches recorded agent task paths and nicknames while preserving conversation titles', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'session-lens-names-'));
+    const store = new SessionStore(path.join(root, 'test.sqlite'));
+    try {
+      const agent = data('named-agent', 'ordinary request text', 'parent');
+      agent.session.agentName = '/root/review_worker';
+      agent.session.agentNickname = 'TestAlias';
+      store.upsert(agent, '/logs/named-agent.jsonl', 100, 1);
+      for (const query of ['review_worker', '/root/review_worker', 'TestAlias']) {
+        const result = store.list({ query }, ready);
+        expect(result.items.map(item => item.id)).toEqual(['named-agent']);
+        expect(result.items[0]?.title).toBe('Session named-agent');
+      }
+    } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
   test('Chinese substring search returns a turn match, and wildcard characters remain literal', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'session-lens-store-'));
     const store = new SessionStore(path.join(root, 'test.sqlite'));
@@ -154,7 +170,7 @@ describe('background index service', () => {
       expect(childDetail?.turns.map(turn => turn.id)).toEqual(['child-turn']);
       expect(childDetail?.session.usage.tokens?.totalTokens).toBe(110);
       expect((await index.list({ query: '父会话独有问题' })).items.map(item => item.id)).toEqual([parentId]);
-      expect((await readdir(cache)).some(name => name === `index-v2-${hash}.sqlite`)).toBe(true);
+      expect((await readdir(cache)).some(name => name === `index-v${INDEX_SCHEMA_VERSION}-${hash}.sqlite`)).toBe(true);
     } finally {
       await index.stop();
       if (!path.resolve(root).startsWith(path.join(tmpdir(), 'session-lens-lineage-'))) throw new Error('Unexpected cleanup target');

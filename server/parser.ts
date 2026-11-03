@@ -35,6 +35,7 @@ interface CachedIndex {
   entryOrdinal: number;
   compactions: { id: string; turnId?: string; timestamp: string; offset: number }[];
   activityMessages: SessionActivity['messages'];
+  agentPath?: string;
   index: IndexedSession | null;
 }
 
@@ -62,6 +63,15 @@ function contentText(value: unknown): string {
 
 function messageText(payload: Json): string {
   return contentText(payload.content ?? payload.message ?? payload.text ?? '');
+}
+
+function recordedName(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function parentSessionId(meta: Json): string | undefined {
+  return [meta.parent_session_id, meta.parent_thread_id, meta.source?.subagent?.thread_spawn?.parent_thread_id,
+    meta.source?.subagent?.parent_thread_id, meta.thread_source?.parent_thread_id].map(recordedName).find(Boolean);
 }
 
 function isInjected(text: string): boolean {
@@ -228,6 +238,7 @@ function processLine(state: CachedIndex, line: Line): void {
   turn.summary.endOffset = line.end;
   if (classified?.collaboration) {
     const collaboration = classified.collaboration;
+    if (!state.agentPath && parentSessionId(state.meta) && collaboration.messageType === 'NEW_TASK') state.agentPath = collaboration.taskName;
     const preview = collaboration.payload.length > 200 ? `${collaboration.payload.slice(0, 199).replace(/[\uD800-\uDBFF]$/, '')}…` : collaboration.payload;
     state.activityMessages.push({ id: `event-${line.start}`, turnId: turn.summary.id, timestamp,
       messageType: collaboration.messageType, sender: collaboration.sender, taskName: collaboration.taskName, preview });
@@ -288,8 +299,10 @@ function buildIndex(state: CachedIndex, filePath: string, fileSize: number, upda
     ?? createHash('sha256').update(filePath).digest('hex').slice(0, 24));
   const firstPrompt = turns.find(turn => turn.prompt)?.prompt;
   const project = cwd ? cwd.split(/[\\/]/).filter(Boolean).at(-1) || cwd : '未知项目';
-  const parentId = meta.parent_session_id ?? meta.parent_thread_id ?? meta.source?.subagent?.thread_spawn?.parent_thread_id
-    ?? meta.source?.subagent?.parent_thread_id ?? meta.thread_source?.parent_thread_id;
+  const parentId = parentSessionId(meta);
+  const spawn = meta.source?.subagent?.thread_spawn;
+  const agentNickname = parentId ? recordedName(meta.agent_nickname) || recordedName(spawn?.agent_nickname) : undefined;
+  const agentName = parentId ? recordedName(meta.agent_path) || recordedName(spawn?.agent_path) || state.agentPath || agentNickname : undefined;
   const session: SessionSummary = {
     id, title: String(meta.thread_name ?? meta['ai-title'] ?? meta.title ?? firstPrompt?.slice(0, 100) ?? project), cwd, project,
     model: turns.at(-1)?.model || state.model || '未知模型', branch: meta.git?.branch,
@@ -298,6 +311,7 @@ function buildIndex(state: CachedIndex, filePath: string, fileSize: number, upda
     status: turns.at(-1)?.status ?? 'unknown', turnCount: turns.length,
     toolCount: turns.reduce((count, turn) => count + turn.toolCount, 0),
     ...(typeof parentId === 'string' ? { parentId } : {}), filePath, fileSize, revision,
+    ...(agentName ? { agentName } : {}), ...(agentNickname ? { agentNickname } : {}),
     usage: state.ledger.summary(), parseErrors: state.parseErrors,
   };
   const searchMessages = [...state.turns.values()].flatMap(turn => [...turn.messages.values()]

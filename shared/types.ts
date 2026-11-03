@@ -118,6 +118,8 @@ export interface SessionSummary {
   turnCount: number;
   toolCount: number;
   parentId?: string;
+  agentName?: string;
+  agentNickname?: string;
   childCount?: number;
   filePath: string;
   fileSize: number;

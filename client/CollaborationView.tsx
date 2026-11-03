@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, ArrowUpRight, ChevronRight, GitBranch, UsersRound } from 'lucide-react';
 import type { SessionActivity, SessionDetail, SessionSummary } from '../shared/types';
-import { clock, collaborationTypeLabels, dateGroup, exactTokens, statusLabels } from './format';
+import { clock, collaborationTypeLabels, dateGroup, exactTokens, sessionDisplayName, sessionTooltip, statusLabels } from './format';
 import './collaboration-view.css';
 
 function SessionNode({ value, relation, current = false, onSelect }: {
@@ -13,7 +13,7 @@ function SessionNode({ value, relation, current = false, onSelect }: {
   const content = <>
     <span className="collab-session-heading">
       <span className="collab-relation">{relation}</span>
-      <strong>{value.title || value.project || '未命名会话'}</strong>
+      <strong>{sessionDisplayName(value)}</strong>
       {!current && <ArrowUpRight size={13} aria-hidden="true" />}
     </span>
     <span className="collab-session-meta">
@@ -26,8 +26,8 @@ function SessionNode({ value, relation, current = false, onSelect }: {
   </>;
 
   return current
-    ? <div className="collab-session current" aria-current="page">{content}</div>
-    : <button className="collab-session" type="button" onClick={() => onSelect(value)}>{content}</button>;
+    ? <div className="collab-session current" aria-current="page" title={sessionTooltip(value)}>{content}</div>
+    : <button className="collab-session" type="button" title={sessionTooltip(value)} onClick={() => onSelect(value)}>{content}</button>;
 }
 
 function MessageList({ messages, session, onNavigateTurn }: {

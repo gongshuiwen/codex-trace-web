@@ -23,6 +23,35 @@ async function file(lines: string[], trailing = '\n'): Promise<string> {
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))); });
 
 describe('Codex rollout parser', () => {
+  it.each([
+    { name: 'own metadata before nested metadata', fields: { agent_path: '/root/own_worker', agent_nickname: 'Alias', source: { subagent: { thread_spawn: { agent_path: '/root/nested_worker' } } } }, task: true, expected: '/root/own_worker' },
+    { name: 'nested metadata before task fallback', fields: { agent_path: ' ', source: { subagent: { thread_spawn: { agent_path: '/root/nested_worker', agent_nickname: 'Alias' } } } }, task: true, expected: '/root/nested_worker' },
+    { name: 'own new-task envelope fallback', fields: {}, task: true, expected: '/root/task_worker' },
+    { name: 'recorded nickname without a task path', fields: { agent_nickname: 'Alias' }, task: false, expected: 'Alias' },
+    { name: 'missing name retains original title', fields: {}, task: false, expected: undefined },
+    { name: 'ordinary parent thread is not named after an outbound task', fields: { parent_thread_id: undefined, agent_path: '/root' }, task: true, expected: undefined },
+  ])('extracts child names: $name', async ({ fields, task, expected }) => {
+    const location = await file([
+      line('session_meta', { id: 'named-session', parent_thread_id: 'parent', title: 'Original title', ...fields }), start(),
+      ...(task ? [line('response_item', { type: 'agent_message', content: 'Message Type: NEW_TASK\nTask name: /root/task_worker\nSender: /root\nPayload:' })] : []), end(),
+    ]);
+    const result = (await indexSessionFile(location)).session;
+    expect(result.agentName).toBe(expected);
+    expect(result.title).toBe('Original title');
+  });
+
+  it('does not take agent names from replayed parent metadata or inherited task envelopes', async () => {
+    const location = await file([
+      line('session_meta', { id: 'own-child', parent_thread_id: 'parent', subagent_history_start_ordinal: 3 }),
+      line('session_meta', { id: 'replayed-parent', agent_path: '/root/wrong_parent', agent_nickname: 'Wrong alias' }),
+      line('response_item', { type: 'agent_message', content: 'Message Type: NEW_TASK\nTask name: /root/wrong_inherited\nSender: /root\nPayload:' }),
+      start(), line('response_item', { type: 'agent_message', content: 'Message Type: NEW_TASK\nTask name: /root/own_child\nSender: /root\nPayload:' }), end(),
+    ]);
+    const result = (await indexSessionFile(location)).session;
+    expect(result.agentName).toBe('/root/own_child');
+    expect(result.agentNickname).toBeUndefined();
+  });
+
   it('returns deduplicated cross-turn requests in file order even with identical or backward timestamps', async () => {
     const usage = { input_tokens: 100, output_tokens: 10, total_tokens: 110 };
     const location = await file([meta(), start(), message('user', 'first'),

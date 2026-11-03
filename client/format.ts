@@ -1,8 +1,17 @@
-import type { CollaborationMessage } from '../shared/types';
+import type { CollaborationMessage, SessionSummary } from '../shared/types';
 
 export const collaborationTypeLabels: Record<CollaborationMessage['messageType'], string> = {
   NEW_TASK: '新任务', MESSAGE: '协作消息', FINAL_ANSWER: '最终答复',
 };
+
+export function sessionDisplayName(session: Pick<SessionSummary, 'agentName' | 'title' | 'project'>): string {
+  const name = session.agentName?.startsWith('/') ? session.agentName.split('/').filter(Boolean).at(-1) : session.agentName;
+  return name || session.title || session.project || '未命名会话';
+}
+
+export function sessionTooltip(session: SessionSummary): string {
+  return [...new Set([session.agentName, session.agentNickname, session.title, session.cwd].filter(Boolean))].join('\n');
+}
 
 export function tokens(value: number | null | undefined): string {
   if (value == null) return '—';

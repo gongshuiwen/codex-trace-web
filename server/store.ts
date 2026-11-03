@@ -3,7 +3,7 @@ import type { IndexedSession } from './parser-types.js';
 import type { IndexProgress, SessionChildrenPage, SessionDetail, SessionList, SessionSummary } from '../shared/types.js';
 
 // Bump when parser semantics change so unchanged source files are reindexed.
-export const INDEX_SCHEMA_VERSION = 2;
+export const INDEX_SCHEMA_VERSION = 3;
 
 export interface ListOptions {
   query?: string;
@@ -219,8 +219,10 @@ export class SessionStore {
       const body = messageSearch(query);
       conditions.push(`(s.title LIKE ? ESCAPE '\\' OR s.cwd LIKE ? ESCAPE '\\'
         OR s.model LIKE ? ESCAPE '\\' OR s.id LIKE ? ESCAPE '\\'
+        OR json_extract(s.summary_json, '$.agentName') LIKE ? ESCAPE '\\'
+        OR json_extract(s.summary_json, '$.agentNickname') LIKE ? ESCAPE '\\'
         OR s.id IN (SELECT session_id FROM messages WHERE ${body.sql}))`);
-      parameters.push(like, like, like, like, ...body.parameters);
+      parameters.push(like, like, like, like, like, like, ...body.parameters);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const total = Number((this.db.prepare(`SELECT COUNT(*) AS count FROM sessions s ${where}`).get(...parameters) as { count: number }).count);
