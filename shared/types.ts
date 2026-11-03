@@ -20,7 +20,7 @@ export interface RequestUsage {
 export interface SessionActivity {
   requests: RequestUsage[];
   compactions: { id: string; turnId?: string; timestamp: string; beforeRequestIndex: number }[];
-  messages: { id: string; turnId: string; timestamp: string; messageType: 'MESSAGE' | 'FINAL_ANSWER'; sender: string; taskName: string; preview: string }[];
+  messages: { id: string; turnId: string; timestamp: string; messageType: CollaborationMessage['messageType']; sender: string; taskName: string; preview: string }[];
   warnings: string[];
 }
 
@@ -144,7 +144,7 @@ export interface TurnSummary {
 export type TimelineKind = 'user' | 'assistant' | 'commentary' | 'context' | 'reasoning' | 'tool' | 'collaboration' | 'notice' | 'unknown';
 
 export interface CollaborationMessage {
-  messageType: 'MESSAGE' | 'FINAL_ANSWER';
+  messageType: 'NEW_TASK' | 'MESSAGE' | 'FINAL_ANSWER';
   taskName: string;
   sender: string;
   payload: string;

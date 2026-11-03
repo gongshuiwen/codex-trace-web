@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, ArrowUpRight, ChevronRight, GitBranch, UsersRound } from 'lucide-react';
 import type { SessionActivity, SessionDetail, SessionSummary } from '../shared/types';
-import { clock, dateGroup, exactTokens, statusLabels } from './format';
+import { clock, collaborationTypeLabels, dateGroup, exactTokens, statusLabels } from './format';
 import './collaboration-view.css';
 
 function SessionNode({ value, relation, current = false, onSelect }: {
@@ -51,7 +51,7 @@ function MessageList({ messages, session, onNavigateTurn }: {
         {messages.slice(start).map(message => <li key={message.id}>
           <button className="collab-message" type="button" onClick={() => onNavigateTurn(message.turnId)}>
             <span className="collab-message-heading">
-              <span className={`collab-message-type ${message.messageType === 'FINAL_ANSWER' ? 'final' : ''}`}>{message.messageType === 'FINAL_ANSWER' ? '最终答复' : '消息'}</span>
+              <span className={`collab-message-type ${message.messageType === 'FINAL_ANSWER' ? 'final' : ''}`}>{collaborationTypeLabels[message.messageType]}</span>
               <time dateTime={message.timestamp} title={message.timestamp}>{dateGroup(message.timestamp)} {clock(message.timestamp)}</time>
               <span className="collab-message-target">{turnNumbers.has(message.turnId) ? `第 ${turnNumbers.get(message.turnId)} 轮` : '来源轮次'}<ArrowUpRight size={12} aria-hidden="true" /></span>
             </span>

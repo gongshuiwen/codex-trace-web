@@ -1,3 +1,9 @@
+import type { CollaborationMessage } from '../shared/types';
+
+export const collaborationTypeLabels: Record<CollaborationMessage['messageType'], string> = {
+  NEW_TASK: '新任务', MESSAGE: '协作消息', FINAL_ANSWER: '最终答复',
+};
+
 export function tokens(value: number | null | undefined): string {
   if (value == null) return '—';
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;

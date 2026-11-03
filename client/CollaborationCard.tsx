@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight, UsersRound } from 'lucide-react';
 import type { TimelineEvent } from '../shared/types';
-import { clock } from './format';
+import { clock, collaborationTypeLabels } from './format';
 import { Markdown } from './Markdown';
 import './collaboration.css';
 
@@ -11,7 +11,7 @@ export function CollaborationCard({ event }: { event: TimelineEvent }) {
   const message = event.collaboration;
   if (!message) return null;
   const sender = message.sender.split('/').filter(Boolean).at(-1) || message.sender;
-  const label = message.messageType === 'FINAL_ANSWER' ? '最终答复' : '协作消息';
+  const label = collaborationTypeLabels[message.messageType];
 
   return <details className="collaboration-card" onToggle={event => {
     setOpen(event.currentTarget.open);
@@ -26,7 +26,7 @@ export function CollaborationCard({ event }: { event: TimelineEvent }) {
     </summary>
     {open && <div className="collaboration-body">
       <div className="collaboration-recipient"><span>接收任务</span><code>{message.taskName}</code></div>
-      {message.payload.trim() ? <Markdown text={message.payload} /> : <p className="collaboration-empty">该协作消息没有正文。</p>}
+      {message.payload.trim() ? <Markdown text={message.payload} /> : <p className="collaboration-empty">这条日志未记录正文。</p>}
       <details className="collaboration-raw" onToggle={event => setRawOpen(event.currentTarget.open)}>
         <summary>查看原始日志消息</summary>
         {rawOpen && <pre>{event.text}</pre>}
