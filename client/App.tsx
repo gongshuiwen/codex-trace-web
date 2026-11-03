@@ -31,6 +31,14 @@ function writeLocation(session: string, turn?: string, replace = false) {
   window.history[replace ? 'replaceState' : 'pushState']({}, '', url);
 }
 
+function mergeSessionPages(previous: SessionList | null, page: SessionList): SessionList {
+  if (!previous) return page;
+  return { ...page,
+    ancestors: [...new Map([...(previous.ancestors ?? []), ...(page.ancestors ?? [])].map(item => [item.id, item])).values()],
+    items: [...new Map([...previous.items, ...page.items].map(item => [item.id, item])).values()],
+  };
+}
+
 export function App() {
   const [location, setLocation] = useState(readLocation);
   const [navigationVersion, setNavigationVersion] = useState(0);
@@ -72,25 +80,34 @@ export function App() {
     window.addEventListener('popstate', handler); return () => window.removeEventListener('popstate', handler);
   }, []);
 
+  const treeSelectedId = !debouncedQuery && !project ? location.session : null;
   const fetchList = useCallback(async (cursor = 0) => {
     listRequest.current?.abort();
     const controller = new AbortController(); listRequest.current = controller;
     const generation = ++listGeneration.current;
     setListLoading(true); setListError('');
     const listKey = `${debouncedQuery}\u0000${project}`;
-    const limit = cursor || listKey !== listKeyRef.current ? 50 : Math.max(50, listStateRef.current?.items.length ?? 0);
+    const wanted = cursor || listKey !== listKeyRef.current ? 50 : Math.max(50, listStateRef.current?.items.length ?? 0);
+    const limit = Math.min(100, wanted);
     const params = new URLSearchParams({ query: debouncedQuery, project, cursor: String(cursor), limit: String(limit) });
+    if (treeSelectedId) params.set('selectedId', treeSelectedId);
     try {
-      const value = await api<SessionList>(`/api/sessions?${params}`, { signal: controller.signal });
+      let value = await api<SessionList>(`/api/sessions?${params}`, { signal: controller.signal });
+      while (!cursor && value.nextCursor != null && value.items.length < wanted) {
+        params.set('cursor', String(value.nextCursor));
+        params.set('limit', String(Math.min(100, wanted - value.items.length)));
+        const page = await api<SessionList>(`/api/sessions?${params}`, { signal: controller.signal });
+        value = mergeSessionPages(value, page);
+      }
       if (controller.signal.aborted || generation !== listGeneration.current) return;
       listKeyRef.current = listKey;
-      setSessions(previous => cursor ? { ...value, items: [...(previous?.items ?? []), ...value.items.filter(item => !previous?.items.some(old => old.id === item.id))] } : value);
+      setSessions(previous => cursor ? mergeSessionPages(previous, value) : value);
       if (!locationRef.current.session && value.items[0]) {
         writeLocation(value.items[0].id, undefined, true); setLocation({ session: value.items[0].id, turn: null });
       }
     } catch (cause) { if (!isAbort(cause) && generation === listGeneration.current) setListError(errorMessage(cause)); }
     finally { if (generation === listGeneration.current) setListLoading(false); }
-  }, [debouncedQuery, project]);
+  }, [debouncedQuery, project, treeSelectedId]);
   useEffect(() => { void fetchList(); return () => listRequest.current?.abort(); }, [fetchList, listVersion]);
 
   useEffect(() => {

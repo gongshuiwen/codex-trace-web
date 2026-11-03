@@ -1,0 +1,17 @@
+.session-tree-list,.session-children{list-style:none;padding:0;margin:0}
+.session-tree-row{display:flex;align-items:flex-start;min-width:0}
+.session-tree-row>.session-item{flex:1;min-width:0;width:0;padding-left:8px;padding-right:8px}
+.session-tree-toggle,.session-tree-spacer{width:22px;min-width:22px;height:34px;margin-top:3px;display:flex;align-items:center;justify-content:center}
+.session-tree-toggle{border:0;background:transparent;border-radius:4px;padding:0;color:var(--muted)}
+.session-tree-toggle:hover{background:var(--hover);color:var(--text)}
+.session-children{margin-left:11px;padding-left:5px;border-left:1px solid var(--border)}
+.session-tree-row .session-title>svg{flex-shrink:0}
+.session-parent-label{font-size:11px;color:var(--muted);font-weight:400;border:1px solid var(--border);border-radius:3px;padding:0 3px;white-space:nowrap}
+.session-child-count{font:11px var(--font-mono);color:var(--muted);flex-shrink:0}
+.session-branch-status{font-size:11px;color:var(--muted);padding:4px 6px 8px 25px;line-height:1.5}
+.session-branch-status button{border:0;background:transparent;color:var(--accent-strong);padding:3px 0;font:inherit;text-align:left}
+.session-branch-status .branch-error{color:var(--danger);display:block;overflow-wrap:anywhere}
+.session-children .session-meta{gap:6px;flex-wrap:wrap;min-width:0}
+.session-children .session-meta>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-children .session-meta>span:first-child{max-width:70px}
+.session-children .session-meta>time{margin-left:auto}

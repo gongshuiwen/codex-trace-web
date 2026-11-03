@@ -118,6 +118,7 @@ export interface SessionSummary {
   turnCount: number;
   toolCount: number;
   parentId?: string;
+  childCount?: number;
   filePath: string;
   fileSize: number;
   revision: string;
@@ -195,10 +196,18 @@ export interface IndexProgress {
 
 export interface SessionList {
   items: SessionSummary[];
+  ancestors?: SessionSummary[];
+  selected?: SessionSummary;
   total: number;
   nextCursor: number | null;
   projects: { name: string; path: string; count: number }[];
   progress: IndexProgress;
+}
+
+export interface SessionChildrenPage {
+  items: SessionSummary[];
+  total: number;
+  nextCursor: number | null;
 }
 
 export interface AppSettings {

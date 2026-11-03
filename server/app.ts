@@ -108,9 +108,10 @@ export async function createApp(options: AppOptions) {
     return settings;
   });
 
-  app.get<{ Querystring: { query?: string; project?: string; cursor?: number; limit?: number } }>('/api/sessions', {
+  app.get<{ Querystring: { query?: string; project?: string; selectedId?: string; cursor?: number; limit?: number } }>('/api/sessions', {
     schema: { querystring: { type: 'object', properties: {
       query: { type: 'string', maxLength: 500 }, project: { type: 'string', maxLength: 4096 },
+      selectedId: { type: 'string', maxLength: 256 },
       cursor: { type: 'integer', minimum: 0, maximum: 10000000, default: 0 },
       limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
     } } },
@@ -120,6 +121,17 @@ export async function createApp(options: AppOptions) {
     const detail = await index.get(request.params.id);
     if (!detail) throw Object.assign(new Error('未找到此会话，可能仍在索引中。'), { statusCode: 404 });
     return detail;
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { cursor?: number; limit?: number } }>('/api/sessions/:id/children', {
+    schema: { querystring: { type: 'object', properties: {
+      cursor: { type: 'integer', minimum: 0, maximum: 10000000, default: 0 },
+      limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+    } } },
+  }, async request => {
+    const page = await index.children(request.params.id, request.query);
+    if (!page) throw Object.assign(new Error('未找到此父会话。'), { statusCode: 404 });
+    return page;
   });
 
   app.get<{ Params: { id: string } }>('/api/sessions/:id/activity', async request => {

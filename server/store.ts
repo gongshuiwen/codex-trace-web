@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { IndexedSession } from './parser-types.js';
-import type { IndexProgress, SessionDetail, SessionList, SessionSummary } from '../shared/types.js';
+import type { IndexProgress, SessionChildrenPage, SessionDetail, SessionList, SessionSummary } from '../shared/types.js';
 
 // Bump when parser semantics change so unchanged source files are reindexed.
 export const INDEX_SCHEMA_VERSION = 2;
@@ -10,19 +10,28 @@ export interface ListOptions {
   project?: string;
   cursor?: number;
   limit?: number;
+  selectedId?: string;
 }
 
-interface SessionRow {
+interface SummaryRow {
+  id: string;
+  summary_json: string;
+  child_count?: number;
+}
+
+interface SessionRow extends SummaryRow {
   id: string;
   file_path: string;
   size: number;
   mtime_ms: number;
-  summary_json: string;
   turns_json: string;
 }
 
-function summary(row: SessionRow): SessionSummary {
-  return JSON.parse(row.summary_json) as SessionSummary;
+const summaryFields = `s.id, s.summary_json,
+  (SELECT COUNT(*) FROM sessions child WHERE child.parent_id = s.id AND child.id != s.id) AS child_count`;
+
+function summary(row: SummaryRow): SessionSummary {
+  return { ...JSON.parse(row.summary_json), ...(row.child_count !== undefined ? { childCount: Number(row.child_count) } : {}) } as SessionSummary;
 }
 
 function escapedLike(text: string): string {
@@ -146,20 +155,53 @@ export class SessionStore {
   }
 
   get(id: string): SessionDetail | null {
-    const row = this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as SessionRow | undefined;
+    const row = this.db.prepare(`SELECT s.*, (SELECT COUNT(*) FROM sessions child WHERE child.parent_id = s.id AND child.id != s.id) AS child_count
+      FROM sessions s WHERE s.id = ?`).get(id) as SessionRow | undefined;
     if (!row) return null;
     const session = summary(row);
     const parent = session.parentId && session.parentId !== id
-      ? this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(session.parentId) as SessionRow | undefined
+      ? this.getSummary(session.parentId)
       : undefined;
-    const children = this.db.prepare('SELECT * FROM sessions WHERE parent_id = ? AND id != ? ORDER BY updated_at DESC')
-      .all(id, id) as unknown as SessionRow[];
+    const children = this.db.prepare(`SELECT ${summaryFields} FROM sessions s WHERE s.parent_id = ? AND s.id != ? ORDER BY s.updated_at DESC, s.id ASC`)
+      .all(id, id) as unknown as SummaryRow[];
     return {
       session,
       turns: JSON.parse(row.turns_json),
       children: children.map(summary),
-      ...(parent ? { parent: summary(parent) } : {}),
+      ...(parent ? { parent } : {}),
     };
+  }
+
+  private getSummary(id: string): SessionSummary | undefined {
+    const row = this.db.prepare(`SELECT ${summaryFields} FROM sessions s WHERE s.id = ?`).get(id) as SummaryRow | undefined;
+    return row ? summary(row) : undefined;
+  }
+
+  children(id: string, options: Pick<ListOptions, 'cursor' | 'limit'> = {}): SessionChildrenPage | null {
+    if (!this.db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(id)) return null;
+    const cursor = Math.max(0, Math.trunc(options.cursor ?? 0));
+    const limit = Math.min(100, Math.max(1, Math.trunc(options.limit ?? 50)));
+    const total = Number((this.db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE parent_id = ? AND id != ?').get(id, id) as { count: number }).count);
+    const rows = this.db.prepare(`SELECT ${summaryFields} FROM sessions s WHERE s.parent_id = ? AND s.id != ?
+      ORDER BY s.updated_at DESC, s.id ASC LIMIT ? OFFSET ?`).all(id, id, limit, cursor) as unknown as SummaryRow[];
+    return { items: rows.map(summary), total, nextCursor: cursor + rows.length < total ? cursor + rows.length : null };
+  }
+
+  private ancestorsOf(items: SessionSummary[]): SessionSummary[] {
+    const visible = new Set(items.map(item => item.id));
+    const ancestors = new Map<string, SessionSummary>();
+    const examined = new Set<string>();
+    for (const item of items) {
+      let parentId = item.parentId;
+      while (parentId && !examined.has(parentId)) {
+        examined.add(parentId);
+        const parent = this.getSummary(parentId);
+        if (!parent) break;
+        if (!visible.has(parent.id)) ancestors.set(parent.id, parent);
+        parentId = parent.parentId;
+      }
+    }
+    return [...ancestors.values()];
   }
 
   list(options: ListOptions, progress: IndexProgress): SessionList {
@@ -182,8 +224,8 @@ export class SessionStore {
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const total = Number((this.db.prepare(`SELECT COUNT(*) AS count FROM sessions s ${where}`).get(...parameters) as { count: number }).count);
-    const rows = this.db.prepare(`SELECT s.* FROM sessions s ${where} ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?`)
-      .all(...parameters, limit, cursor) as unknown as SessionRow[];
+    const rows = this.db.prepare(`SELECT ${summaryFields} FROM sessions s ${where} ORDER BY s.updated_at DESC, s.id ASC LIMIT ? OFFSET ?`)
+      .all(...parameters, limit, cursor) as unknown as SummaryRow[];
     const items = rows.map(row => {
       const value = summary(row);
       if (query) {
@@ -201,6 +243,9 @@ export class SessionStore {
     const projects = (this.db.prepare(`SELECT cwd AS path, project AS name, COUNT(*) AS count FROM sessions
       GROUP BY cwd ORDER BY COUNT(*) DESC, cwd ASC`).all() as { path: string; name: string; count: number }[])
       .map(row => ({ ...row, count: Number(row.count) }));
-    return { items, total, nextCursor: cursor + items.length < total ? cursor + items.length : null, projects, progress };
+    const selected = !query && !options.project && options.selectedId ? this.getSummary(options.selectedId) : undefined;
+    const ancestors = this.ancestorsOf(selected ? [...items, selected] : items);
+    return { items, total, nextCursor: cursor + items.length < total ? cursor + items.length : null, projects, progress,
+      ancestors, ...(selected ? { selected } : {}) };
   }
 }

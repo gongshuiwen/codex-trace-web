@@ -183,6 +183,7 @@ port.on('message', async (message: { id?: number; method: string; args: unknown[
     switch (message.method) {
       case 'list': result = store.list((message.args[0] || {}) as ListOptions, { ...progress }); break;
       case 'get': result = store.get(String(message.args[0])); break;
+      case 'children': result = store.children(String(message.args[0]), (message.args[1] || {}) as ListOptions); break;
       case 'getPath': result = await safePath(String(message.args[0])); break;
       case 'activity': {
         const file = await safePath(String(message.args[0]));
