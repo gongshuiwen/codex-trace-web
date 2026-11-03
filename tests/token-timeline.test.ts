@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RequestUsage } from '../shared/types';
-import { compactionX, requestPointLabel, timelinePage, tokenPlot, TOKEN_PLOT } from '../client/token-timeline';
+import { compactionX, nearestRequestIndex, requestPointLabel, timelinePage, tokenPlot, TOKEN_PLOT } from '../client/token-timeline';
 
 const request = (id: string, input: number, output = 20, cache = 0, source: RequestUsage['source'] = 'record'): RequestUsage => ({
   id, turnId: 't1', timestamp: '2026-01-01T00:00:00Z', source,
@@ -51,5 +51,50 @@ describe('token timeline geometry', () => {
     expect(empty.points).toEqual([]);
     expect(empty.line('inputTokens')).toBe('');
     expect(Number.isFinite(tokenPlot([request('zero', 0, 0)]).points[0]!.y('inputTokens'))).toBe(true);
+  });
+
+  it('fits the entire log and every compression boundary inside a phone overview', () => {
+    const values = Array.from({ length: 1005 }, (_, index) => request(`r${index}`, index));
+    const plot = tokenPlot(values, 0, { mode: 'overview', width: 350 });
+    expect(plot.width).toBe(350);
+    expect(plot.points.map(point => point.request.id)).toEqual(values.map(item => item.id));
+    for (const boundary of [0, 1, 99, 100, 500, 1004, 1005]) {
+      const x = compactionX(boundary, plot)!;
+      expect(x).toBeGreaterThanOrEqual(TOKEN_PLOT.left);
+      expect(x).toBeLessThanOrEqual(plot.width - 20);
+    }
+    expect(plot.points.at(-1)!.x).toBeLessThan(plot.width - 20);
+    expect(plot.labels.size).toBeLessThanOrEqual(4);
+    expect(plot.labels.has(0)).toBe(true);
+    expect(plot.labels.has(1004)).toBe(true);
+  });
+
+  it('recomputes coordinates when the same overview narrows for an open inspector', () => {
+    const values = [request('r1', 100), request('r2', 120), request('r3', 140)];
+    const wide = tokenPlot(values, 0, { mode: 'overview', width: 1000 });
+    const narrow = tokenPlot(values, 0, { mode: 'overview', width: 600 });
+    expect(compactionX(3, wide)).toBe(980);
+    expect(compactionX(3, narrow)).toBe(580);
+    expect(narrow.points[2]!.x).toBeLessThan(wide.points[2]!.x);
+    expect(narrow.points.map(point => point.request.id)).toEqual(wide.points.map(point => point.request.id));
+  });
+
+  it('uses the selected output metric for its scale instead of flattening it under inputs', () => {
+    const values = [request('r1', 100000, 20, 90000), request('r2', 120000, 40, 100000)];
+    const all = tokenPlot(values, 0, { mode: 'overview', width: 350, metric: 'all' });
+    const output = tokenPlot(values, 0, { mode: 'overview', width: 350, metric: 'outputTokens' });
+    expect(output.maximum).toBeGreaterThan(40);
+    expect(output.maximum).toBeLessThan(100);
+    expect(all.points[1]!.y('outputTokens')).toBeGreaterThan(TOKEN_PLOT.bottom - 1);
+    expect(output.points[1]!.y('outputTokens')).toBeLessThan(TOKEN_PLOT.bottom - 70);
+  });
+
+  it('selects exact nearest records and clamps edge clicks without dropping long-session calls', () => {
+    const values = Array.from({ length: 1005 }, (_, index) => request(`r${index}`, index));
+    const plot = tokenPlot(values, 0, { mode: 'overview', width: 350 });
+    for (const index of [0, 99, 500, 1004]) expect(nearestRequestIndex(plot.points[index]!.x, plot)).toBe(index);
+    expect(nearestRequestIndex(-100, plot)).toBe(0);
+    expect(nearestRequestIndex(10000, plot)).toBe(1004);
+    expect(nearestRequestIndex(100, tokenPlot([], 0, { mode: 'overview', width: 350 }))).toBeNull();
   });
 });

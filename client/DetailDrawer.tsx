@@ -1,48 +1,181 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { X, ArrowUpRight, Code2, Hash, Layers3 } from 'lucide-react';
-import type { RequestUsage, SessionDetail, TurnDetail } from '../shared/types';
+import type { RequestUsage, SessionActivity, SessionDetail, TurnDetail } from '../shared/types';
 import { api, errorMessage, isAbort, sessionPath } from './api';
 import { UsageBlock } from './Stats';
 import { clock, exactTokens, prettyArguments } from './format';
 import type { Inspection } from './TurnCard';
 import { RequestContext } from './RequestContext';
 import { RequestComparison } from './RequestComparison';
+import { useOverlayFocus } from './useOverlayFocus';
+import { latestRecordedRequest } from './latest-request';
 
-function RequestCard({ request, index, sessionId, revision, onNavigateTurn, selectedRequest }: { request: RequestUsage; index: number; sessionId: string; revision: string; onNavigateTurn: (turnId: string) => void; selectedRequest?: Inspection }) {
-  const [open, setOpen] = useState(!!selectedRequest);
-  const detailsRef = useRef<HTMLDetailsElement>(null);
+function RequestCard({ request, index, sessionId, revision, onNavigateTurn, selected }: { request: RequestUsage; index: number; sessionId: string; revision: string; onNavigateTurn: (turnId: string) => void; selected: boolean }) {
+  const [open, setOpen] = useState(selected);
   useEffect(() => {
-    if (!selectedRequest) return;
-    setOpen(true);
-    const frame = requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ block: 'nearest' }));
-    return () => cancelAnimationFrame(frame);
-  }, [selectedRequest]);
-  return <details ref={detailsRef} data-request-id={request.id} className={`request-card ${selectedRequest ? 'selected-request' : ''}`} open={open} onToggle={event => setOpen(event.currentTarget.open)}><summary><span><Hash size={12} />{index + 1}<time>{clock(request.timestamp)}</time></span><strong>{exactTokens(request.usage.totalTokens)}<ArrowUpRight size={12} /></strong></summary>{open && <><dl className="usage-facts"><div><dt>输入</dt><dd>{exactTokens(request.usage.inputTokens)}</dd></div><div><dt>缓存读取</dt><dd>{exactTokens(request.usage.cachedInputTokens)}</dd></div><div><dt>缓存写入</dt><dd>{exactTokens(request.usage.cacheWriteInputTokens)}</dd></div><div><dt>输出</dt><dd>{exactTokens(request.usage.outputTokens)}</dd></div><div><dt>推理输出（已含在输出中）</dt><dd>{exactTokens(request.usage.reasoningOutputTokens)}</dd></div><div><dt>记录来源</dt><dd>{request.source === 'record' ? '原始调用记录' : '累计快照差值'}</dd></div></dl><RequestComparison sessionId={sessionId} request={request} revision={revision} onNavigateTurn={onNavigateTurn} /><RequestContext sessionId={sessionId} request={request} revision={revision} onNavigateTurn={onNavigateTurn} /></>}</details>;
+    if (selected) setOpen(true);
+  }, [selected]);
+  return <details data-request-id={request.id} className={`request-card mt-[10px] rounded-[6px] border bg-(--panel) px-[12px] ${selected ? 'selected-request border-(--accent)' : 'border-(--border)'}`} open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary className={`flex min-h-[40px] cursor-pointer list-none items-center justify-between gap-[12px] py-[10px] text-[12px] text-(--soft) outline-offset-4 [&::-webkit-details-marker]:hidden max-[560px]:min-h-[44px] ${selected ? 'bg-(--accent-light)' : 'hover:bg-(--hover)'}`}>
+      <span className="flex min-w-0 items-center gap-[4px]"><Hash size={12} aria-hidden="true" />{index + 1}<time className="ml-[6px] font-sans text-[12px] text-(--muted)">{clock(request.timestamp)}</time></span>
+      <strong className="flex shrink-0 items-center gap-[4px] font-mono text-[12px] font-normal text-(--soft) tabular-nums">{exactTokens(request.usage.totalTokens)}<ArrowUpRight size={12} aria-hidden="true" /></strong>
+    </summary>
+    {open && <>
+      <dl className="usage-facts mt-[4px] mb-[14px] space-y-[10px] text-[12px] leading-[1.6]">
+        {[
+          ['输入', exactTokens(request.usage.inputTokens)],
+          ['缓存读取', exactTokens(request.usage.cachedInputTokens)],
+          ['缓存写入', exactTokens(request.usage.cacheWriteInputTokens)],
+          ['输出', exactTokens(request.usage.outputTokens)],
+          ['推理输出（已含在输出中）', exactTokens(request.usage.reasoningOutputTokens)],
+          ['记录来源', request.source === 'record' ? '原始调用记录' : '累计快照差值'],
+        ].map(([label, value]) => <div key={label} className="flex items-baseline justify-between gap-[12px]">
+          <dt className="min-w-0 text-(--muted)">{label}</dt>
+          <dd className="m-0 shrink-0 font-mono text-(--soft) tabular-nums">{value}</dd>
+        </div>)}
+      </dl>
+      <RequestComparison sessionId={sessionId} request={request} revision={revision} onNavigateTurn={onNavigateTurn} />
+      <RequestContext sessionId={sessionId} request={request} revision={revision} onNavigateTurn={onNavigateTurn} />
+    </>}
+  </details>;
 }
 
 export function DetailDrawer({ session, selection, onClose, onNavigateTurn }: { session: SessionDetail; selection: Inspection; onClose: () => void; onNavigateTurn: (turnId: string) => void }) {
   const [turn, setTurn] = useState<TurnDetail | null>(null);
   const [error, setError] = useState('');
+  const [latest, setLatest] = useState<{ key: string; request: RequestUsage | null; failed?: boolean } | null>(null);
+  const [modal, setModal] = useState(() => window.matchMedia('(max-width: 1200px)').matches);
+  const titleId = useId();
+  const drawerRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sessionUsageRef = useRef<HTMLDivElement>(null);
+  const turnUsageRef = useRef<HTMLDivElement>(null);
+  const requestListRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const loadedSelection = useRef('');
-  useEffect(() => { closeRef.current?.focus(); }, []);
+  const latestMode = selection.focus === 'latest';
+  const latestKey = `${session.session.id}\u0000${session.session.revision}\u0000${session.session.usage.latestInputTokens ?? 'unknown'}`;
+  const latestLoading = latestMode && latest?.key !== latestKey;
+  const latestRequest = latestMode && latest?.key === latestKey ? latest.request : null;
+  const targetTurnId = latestMode ? latestRequest?.turnId : selection.turnId;
+  useOverlayFocus({ container: drawerRef, initialFocus: closeRef, modal, onClose });
   useEffect(() => {
-    const key = `${session.session.id}\u0000${selection.turnId ?? ''}`;
+    const media = window.matchMedia('(max-width: 1200px)');
+    const update = () => setModal(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  useEffect(() => {
+    if (!latestMode) return;
+    if (session.session.usage.latestInputTokens == null) {
+      setLatest({ key: latestKey, request: null });
+      return;
+    }
+    const controller = new AbortController();
+    api<SessionActivity>(`${sessionPath(session.session.id)}/activity`, { signal: controller.signal }).then(activity => {
+      if (controller.signal.aborted) return;
+      const candidate = latestRecordedRequest(activity.requests, session.session.usage.latestInputTokens);
+      const request = candidate && session.turns.some(item => item.id === candidate.turnId) ? candidate : null;
+      setLatest({ key: latestKey, request });
+    }).catch(cause => {
+      if (!controller.signal.aborted && !isAbort(cause)) setLatest({ key: latestKey, request: null, failed: true });
+    });
+    return () => controller.abort();
+  }, [latestMode, latestKey, session.session.id]);
+  useEffect(() => {
+    const key = `${session.session.id}\u0000${targetTurnId ?? ''}`;
     if (loadedSelection.current !== key) setTurn(null);
     loadedSelection.current = key;
     setError('');
-    if (!selection.turnId) return;
+    if (!targetTurnId) return;
     const controller = new AbortController();
-    api<TurnDetail>(`${sessionPath(session.session.id)}/turns/${encodeURIComponent(selection.turnId)}`, { signal: controller.signal }).then(result => { if (!controller.signal.aborted) setTurn(result); }).catch(cause => { if (!isAbort(cause)) setError(errorMessage(cause)); });
+    api<TurnDetail>(`${sessionPath(session.session.id)}/turns/${encodeURIComponent(targetTurnId)}`, { signal: controller.signal }).then(result => { if (!controller.signal.aborted) setTurn(result); }).catch(cause => { if (!isAbort(cause)) setError(errorMessage(cause)); });
     return () => controller.abort();
-  }, [session.session.id, session.session.revision, selection.turnId]);
-  const tool = turn?.events.find(event => event.tool?.id === selection.toolId)?.tool;
-  return <><button className="drawer-backdrop" aria-label="关闭详情" onClick={onClose} /><aside className="detail-drawer" aria-label="统计与调用详情"><div className="drawer-heading"><div><span className="eyebrow">INSPECTOR</span><h2>{selection.toolId ? '调用详情' : selection.turnId ? '轮次统计' : '会话统计'}</h2></div><button ref={closeRef} className="icon-button" onClick={onClose} title="关闭详情 (Esc)" aria-label="关闭详情"><X size={18} /></button></div><div className="drawer-scroll">
-    {error && <div className="inline-error" role="alert">{error}</div>}
-    {selection.turnId && !turn && !error && <div className="turn-loading">正在读取明细…</div>}
-    {tool && <section className="tool-detail"><div className="detail-section-heading"><Code2 size={15} /><span>{tool.name}</span></div><div className="detail-note">调用 ID <code>{tool.id}</code></div><pre className="inspector-code">{prettyArguments(tool.arguments)}</pre><p className="detail-note">输出共 {tool.outputLength.toLocaleString()} 字符。展开时间线中的工具卡片可分段读取输出。</p><div className="detail-note">此调用本身没有独立 token 账单，下方展示其所在轮次的模型用量。</div></section>}
-    {turn && <><UsageBlock usage={turn.summary.usage} label={`第 ${turn.summary.index + 1} 轮用量`} /><section className="request-list"><div className="detail-section-heading"><span>逐次模型调用</span><span className="subtle-badge">{turn.requests.length} 条记录</span></div>{turn.requests.length === 0 && <p className="detail-note">此轮日志没有逐次用量记录。</p>}{turn.requests.map((request, index) => <RequestCard key={request.id} request={request} index={index} sessionId={session.session.id} revision={session.session.revision} selectedRequest={selection.requestId === request.id ? selection : undefined} onNavigateTurn={turnId => { onClose(); onNavigateTurn(turnId); }} />)}</section></>}
-    <UsageBlock usage={session.session.usage} label="整个会话用量" />
-    <section className="session-properties"><div className="detail-section-heading"><Layers3 size={14} /><span>会话信息</span></div><dl className="properties"><dt>会话 ID</dt><dd>{session.session.id}</dd><dt>来源</dt><dd>{session.session.source || '未记录'}</dd><dt>日志文件</dt><dd>{session.session.filePath}</dd><dt>解析异常</dt><dd>{session.session.parseErrors} 行</dd></dl></section>
-  </div></aside></>;
+  }, [session.session.id, session.session.revision, targetTurnId]);
+  const activeTurn = turn?.summary.id === targetTurnId ? turn : null;
+  const exactLatestRequest = latestRequest && activeTurn?.requests.find(request => request.id === latestRequest.id && request.source === 'record' && request.usage.inputTokens === session.session.usage.latestInputTokens);
+  const latestFallback = latestMode && !latestLoading && (!latestRequest || Boolean(activeTurn && !exactLatestRequest) || Boolean(error));
+  const displayedTurn = latestMode && !exactLatestRequest ? null : activeTurn;
+  const selectedRequestId = latestMode ? exactLatestRequest?.id : selection.requestId;
+  useEffect(() => {
+    if (latestLoading || targetTurnId && !activeTurn && !latestFallback) return;
+    const frame = requestAnimationFrame(() => {
+      const scroll = scrollRef.current;
+      if (!scroll) return;
+      let anchor: HTMLElement | null = displayedTurn ? turnUsageRef.current : sessionUsageRef.current;
+      let target: HTMLElement | null = null;
+      if (selection.toolId) anchor = scroll.querySelector<HTMLElement>('.tool-detail') ?? anchor;
+      if (selectedRequestId) {
+        const card = Array.from(scroll.querySelectorAll<HTMLElement>('[data-request-id]')).find(item => item.dataset.requestId === selectedRequestId);
+        target = card?.querySelector<HTMLElement>('summary') ?? null;
+        anchor = card ?? anchor;
+      } else if (selection.focus === 'requests') {
+        anchor = requestListRef.current ?? anchor;
+        target = anchor?.querySelector<HTMLElement>('.request-list-heading') ?? null;
+      } else if (selection.focus === 'cache') {
+        target = anchor?.querySelector<HTMLElement>('.cache-caption') ?? null;
+      } else if (selection.focus === 'total') {
+        target = anchor?.querySelector<HTMLElement>('.usage-total') ?? null;
+      } else if (latestFallback) {
+        target = Array.from(anchor?.querySelectorAll<HTMLElement>('.usage-facts > div') ?? []).find(row => row.querySelector('dt')?.textContent === '最近一次输入') ?? null;
+      }
+      if (!anchor) return;
+      const offset = selectedRequestId ? (requestListRef.current?.querySelector<HTMLElement>('.request-list-heading')?.offsetHeight ?? 0) + 12 : 0;
+      const top = scroll.scrollTop + anchor.getBoundingClientRect().top - scroll.getBoundingClientRect().top - offset;
+      scroll.scrollTo({ top: Math.max(0, top), behavior: 'instant' });
+      if (target) {
+        if (target.tabIndex < 0) target.tabIndex = -1;
+        target.focus({ preventScroll: true });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selection, activeTurn?.summary.id, displayedTurn?.summary.id, selectedRequestId, latestLoading, latestFallback, targetTurnId]);
+  const tool = displayedTurn?.events.find(event => event.tool?.id === selection.toolId)?.tool;
+  return <>
+    <button className={`drawer-backdrop border-0 ${modal ? 'fixed inset-0 z-[30] block bg-[#102318]/25' : 'hidden'}`} aria-label="关闭详情" tabIndex={-1} aria-hidden="true" onClick={onClose} />
+    <aside ref={drawerRef} className={`detail-drawer z-[31] flex min-w-0 flex-col border-l border-(--border) bg-(--panel) text-(--text) ${modal ? 'fixed inset-y-0 right-0 w-[360px] max-w-[calc(100vw-24px)] shadow-[-12px_0_40px_#14251a17] max-[560px]:w-full max-[560px]:max-w-none max-[560px]:border-l-0' : 'relative w-[354px] shrink-0'}`} role={modal ? 'dialog' : undefined} aria-modal={modal || undefined} aria-labelledby={titleId} tabIndex={-1}>
+      <div className="drawer-heading flex h-[76px] min-h-[76px] shrink-0 items-center justify-between gap-[16px] border-b border-(--border) px-[24px] max-[560px]:h-[68px] max-[560px]:min-h-[68px] max-[560px]:px-[20px]">
+        <h2 id={titleId} className="m-0 min-w-0 text-[18px] leading-[1.4] font-semibold">{selection.toolId ? '调用详情' : latestMode ? exactLatestRequest ? '最近一次调用' : '最近输入摘要' : selection.turnId ? '轮次统计' : '会话统计'}</h2>
+        <button ref={closeRef} className="icon-button inline-flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-[6px] border-0 bg-transparent text-(--muted) hover:bg-(--hover) hover:text-(--text) max-[560px]:h-[44px] max-[560px]:w-[44px]" onClick={onClose} title="关闭详情 (Esc)" aria-label="关闭详情"><X size={18} /></button>
+      </div>
+      <div ref={scrollRef} className="drawer-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin]">
+        {error && <div className="inline-error m-[20px] rounded-[6px] border border-(--danger)/25 bg-(--bg) p-[12px] text-[12px] leading-[1.8] text-(--danger) [overflow-wrap:anywhere]" role="alert">{error}</div>}
+        {(latestLoading || targetTurnId && !activeTurn && !error) && <div className="turn-loading flex items-center gap-[8px] px-[24px] py-[16px] text-[12px] leading-[1.8] text-(--muted)" role="status">{latestMode ? '正在定位最近输入记录…' : '正在读取明细…'}</div>}
+        {tool && <section className="tool-detail border-b border-(--border) p-[24px] max-[560px]:p-[20px]">
+          <div className="detail-section-heading flex items-center gap-[8px] text-[14px] font-medium text-(--soft) [overflow-wrap:anywhere]"><Code2 size={15} /><span>{tool.name}</span></div>
+          <div className="detail-note mt-[12px] text-[12px] leading-[1.8] text-(--muted) [overflow-wrap:anywhere]">调用 ID <code className="font-mono text-[12px]">{tool.id}</code></div>
+          <pre className="inspector-code mt-[12px] max-h-[260px] overflow-auto rounded-[6px] border border-(--border) bg-(--code) p-[12px] font-mono text-[12px] leading-[1.7] whitespace-pre-wrap text-(--soft) [overflow-wrap:anywhere]">{prettyArguments(tool.arguments)}</pre>
+          <p className="detail-note mt-[12px] mb-0 text-[12px] leading-[1.8] text-(--muted) [overflow-wrap:anywhere]">输出共 {tool.outputLength.toLocaleString()} 字符。展开时间线中的工具卡片可分段读取输出。</p>
+          <div className="detail-note mt-[12px] text-[12px] leading-[1.8] text-(--muted) [overflow-wrap:anywhere]">此调用本身没有独立 token 账单，下方展示其所在轮次的模型用量。</div>
+        </section>}
+        {displayedTurn && <>
+          <div ref={turnUsageRef} className="min-w-0"><UsageBlock usage={displayedTurn.summary.usage} label={`第 ${displayedTurn.summary.index + 1} 轮用量`} /></div>
+          <section ref={requestListRef} className="request-list border-b border-(--border) px-[24px] pt-[16px] pb-[24px] max-[560px]:px-[20px]">
+            <div className="detail-section-heading request-list-heading sticky top-0 z-[1] flex items-center justify-between gap-[8px] bg-(--panel) pt-[8px] pb-[12px] text-[14px] font-medium text-(--soft)" tabIndex={-1}>
+              <span>逐次模型调用</span><span className="subtle-badge shrink-0 rounded-[4px] border border-(--border) bg-(--bg) px-[6px] py-[3px] text-[12px] font-normal whitespace-nowrap text-(--muted)">{displayedTurn.requests.length} 条记录</span>
+            </div>
+            {displayedTurn.requests.length === 0 && <p className="detail-note mt-[12px] mb-0 text-[12px] leading-[1.8] text-(--muted)">此轮日志没有逐次用量记录。</p>}
+            {displayedTurn.requests.map((request, index) => <RequestCard key={request.id} request={request} index={index} sessionId={session.session.id} revision={session.session.revision} selected={selectedRequestId === request.id} onNavigateTurn={turnId => { onClose(); onNavigateTurn(turnId); }} />)}
+          </section>
+        </>}
+        <div ref={sessionUsageRef} className="min-w-0" data-selected-metric={!displayedTurn ? selection.focus : undefined}>
+          {latestFallback && <p className="timeline-notice mx-[24px] my-[16px] rounded-[4px] border-l-2 border-(--warning) bg-(--bg) p-[12px] text-[12px] leading-[1.8] text-(--warning) [overflow-wrap:anywhere] max-[560px]:mx-[20px]" role="status">{latest?.failed ? '暂时无法读取调用记录。' : '日志没有提供可可靠关联的末次原始调用记录。'}当前展示会话摘要中的最近输入，不能定位对应单次调用。</p>}
+          <UsageBlock usage={session.session.usage} label="整个会话用量" />
+        </div>
+        <section className="session-properties p-[24px] max-[560px]:p-[20px]">
+          <div className="detail-section-heading flex items-center gap-[8px] text-[14px] font-medium text-(--soft)"><Layers3 size={14} /><span>会话信息</span></div>
+          <dl className="properties mt-[20px] mb-0 text-[12px] leading-[1.8]">
+            {[
+              ['会话 ID', session.session.id],
+              ['来源', session.session.source || '未记录'],
+              ['日志文件', session.session.filePath],
+              ['解析异常', `${session.session.parseErrors} 行`],
+            ].map(([label, value]) => <div key={label} className="mt-[14px]">
+              <dt className="text-(--muted)">{label}</dt><dd className="mt-[4px] ml-0 font-mono text-(--soft) [overflow-wrap:anywhere]">{value}</dd>
+            </div>)}
+          </dl>
+        </section>
+      </div>
+    </aside>
+  </>;
 }

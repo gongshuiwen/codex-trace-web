@@ -27,7 +27,7 @@ export default function SessionOverview({ session, view, onInspect, onSelectSess
     });
     return () => controller.abort();
   }, [session.session.id, session.session.revision, retry]);
-  return <div className="session-overview" aria-label={view === 'tokens' ? 'Token 与压缩时间轴' : '子代理协作视图'}>
+  return <div className="session-overview h-full min-h-0 overflow-auto px-[var(--canvas-pad)] py-6 [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent] max-[600px]:py-5" aria-label={view === 'tokens' ? 'Token 与压缩时间轴' : '子代理协作视图'}>
     {loading && <p className="turn-loading" role="status"><LoaderCircle size={14} className="spin" />{activity ? '正在更新…' : '正在读取会话活动…'}</p>}
     {error && <p className="inline-error" role="alert">{error}<button onClick={() => setRetry(value => value + 1)}>重试</button></p>}
     {activity && <>
