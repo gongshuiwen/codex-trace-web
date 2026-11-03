@@ -1,95 +1,215 @@
-import { useState } from 'react';
-import { ArrowRight, ArrowUpRight, ChevronRight, GitBranch, UsersRound } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ArrowUpRight, ChevronDown, ChevronRight, GitBranch, LoaderCircle, RefreshCw, UsersRound } from 'lucide-react';
 import type { SessionActivity, SessionDetail, SessionSummary } from '../shared/types';
-import { clock, collaborationTypeLabels, dateGroup, exactTokens, sessionDisplayName, sessionTooltip, statusLabels } from './format';
+import { clock, exactTokens, sessionDisplayName, sessionTooltip, statusLabels } from './format';
+import { buildSessionTree, sessionAncestors } from './session-tree';
+import { collectCollaborationMessages, collaborationRounds, layoutCollaborationTree, type CollaborationEntry, type CollaborationRecord } from './collaboration-data';
+import { useCollaboration } from './useCollaboration';
+import { createParticipantLabels, messageKey } from './collaboration-message';
+import { CollaborationMessages } from './CollaborationMessages';
 import './collaboration-view.css';
 
-const sectionFrame = 'group/section mb-4 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 pb-4 max-[560px]:px-3';
-const sectionHeading = 'flex min-h-11 cursor-pointer list-none items-center gap-2 py-3.5 text-[14px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]';
-const noteText = 'mb-3 text-[12px] leading-[1.8] text-[var(--muted)] [overflow-wrap:anywhere]';
-const textAction = 'inline-flex min-h-11 items-center gap-1.5 rounded-md border-0 bg-transparent py-2 text-[12px] text-[var(--accent-strong)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]';
+type Layout = ReturnType<typeof layoutCollaborationTree>;
 
-function SessionNode({ value, relation, current = false, onSelect }: {
-  value: SessionSummary;
-  relation: string;
-  current?: boolean;
-  onSelect: (session: SessionSummary) => void;
+function AgentNode({ value, current, selected, onSelect }: {
+  value: SessionSummary; current: boolean; selected: boolean; onSelect: () => void;
 }) {
-  const content = <>
-    <span className="collab-session-heading flex min-w-0 items-center gap-2 max-[560px]:flex-wrap max-[560px]:gap-x-2 max-[560px]:gap-y-1">
-      <span className="collab-relation text-[12px] whitespace-nowrap text-[var(--muted)]">{relation}</span>
-      <strong className="min-w-0 truncate text-[14px] leading-snug font-semibold text-[var(--text)] max-[560px]:flex-1 max-[560px]:whitespace-normal max-[560px]:[overflow-wrap:anywhere]">{sessionDisplayName(value)}</strong>
-      {!current && <ArrowUpRight size={13} className="ml-auto shrink-0" aria-hidden="true" />}
-    </span>
-    <span className="collab-session-meta flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-[var(--muted)] tabular-nums max-[560px]:gap-x-3">
-      <span className={`collab-status ${value.status} ${value.status === 'running' || value.status === 'completed' ? 'text-[var(--accent-strong)]' : value.status === 'interrupted' ? 'text-[var(--warning)]' : 'text-[var(--muted)]'}`}>{statusLabels[value.status]}</span>
-      <span>{exactTokens(value.usage.tokens?.totalTokens)} tokens</span>
-      <span>{value.usage.completeness === 'unknown' ? '调用数未知' : `${value.usage.completeness === 'partial' ? '≥ ' : ''}${value.usage.requestCount.toLocaleString('zh-CN')} 次调用`}</span>
-      {value.usage.completeness === 'partial' && <span>部分记录</span>}
-    </span>
-    <code className="collab-session-id font-mono text-[12px] leading-relaxed text-[var(--muted)] [overflow-wrap:anywhere]">{value.id}</code>
-  </>;
-
-  return current
-    ? <div className="collab-session current flex w-full min-w-0 flex-col gap-1.5 rounded-md border border-[var(--border)] bg-[var(--accent-light)] p-3 text-left text-[var(--soft)]" aria-current="page" title={sessionTooltip(value)}>{content}</div>
-    : <button className="collab-session flex w-full min-w-0 flex-col gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg)] p-3 text-left text-[var(--soft)] hover:border-[var(--control)] hover:bg-[var(--hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]" type="button" title={sessionTooltip(value)} onClick={() => onSelect(value)}>{content}</button>;
+  return <button type="button" className="collab-node" aria-pressed={selected} aria-current={current ? 'page' : undefined} title={sessionTooltip(value)} onClick={onSelect}>
+    <strong>{sessionDisplayName(value)}</strong>
+    <span className="collab-node-identity">{current ? '当前会话' : value.agentNickname || (value.parentId ? '子代理' : '主代理')}</span>
+    <span className={`collab-round-status ${value.status}`}>{value.turnCount ? `本轮${statusLabels[value.status]}` : '暂无轮次'}</span>
+  </button>;
 }
 
-function MessageList({ messages, session, onNavigateTurn }: {
-  messages: SessionActivity['messages'];
-  session: SessionDetail;
-  onNavigateTurn: (turnId: string) => void;
+function RelationshipGraph({ layout, currentId, selectedId, ancestors, expanded, messages, loading, onSelect, onToggle }: {
+  layout: Layout; currentId: string; selectedId: string; ancestors: string[]; expanded: ReadonlySet<string>;
+  messages: CollaborationRecord[]; loading: ReadonlySet<string>; onSelect: (id: string) => void; onToggle: (id: string) => void;
 }) {
-  const [visibleCount, setVisibleCount] = useState(12);
-  const start = Math.max(0, messages.length - visibleCount);
-  const turnNumbers = new Map(session.turns.map(turn => [turn.id, turn.index + 1]));
+  const arrowId = useId();
+  const nodes = new Map(layout.nodes.map(node => [node.session.id, node]));
+  const highlighted = new Set([selectedId, ...ancestors]);
+  const routes = new Map<string, { source: string; target: string; count: number }>();
+  for (const { senderId, recipientId } of messages) {
+    if (!senderId || !recipientId || senderId === recipientId || !nodes.has(senderId) || !nodes.has(recipientId)
+      || senderId !== selectedId && recipientId !== selectedId) continue;
+    const key = JSON.stringify([senderId, recipientId]);
+    const route = routes.get(key);
+    if (route) route.count++;
+    else routes.set(key, { source: senderId, target: recipientId, count: 1 });
+  }
+  return <div className="collab-graph-scroll" aria-label="代理关系图">
+    <div className="collab-graph" style={{ width: layout.width, height: layout.height + 60 }}>
+      <svg width={layout.width} height={layout.height + 60} aria-hidden="true">
+        <defs><marker id={arrowId} markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" className="collab-arrow" /></marker></defs>
+        {layout.edges.map(({ parentId, childId }) => {
+          const parent = nodes.get(parentId)!, child = nodes.get(childId)!;
+          const sx = parent.x + 90, sy = parent.y + 82, tx = child.x + 90, ty = child.y;
+          return <path key={childId} className={`collab-parent-edge ${highlighted.has(parentId) && highlighted.has(childId) ? 'selected' : ''}`} d={`M${sx} ${sy} V${sy + 42} H${tx} V${ty}`} />;
+        })}
+        {[...routes].map(([key, route]) => {
+          const source = nodes.get(route.source)!, target = nodes.get(route.target)!;
+          const sameRow = source.y === target.y, down = source.y < target.y;
+          const sx = source.x + 90, sy = source.y + (sameRow || down ? 82 : 0);
+          const tx = target.x + 90, ty = target.y + (sameRow || !down ? 82 : 0);
+          const middle = sameRow ? sy + 48 : (sy + ty) / 2, bend = sx === tx ? (down ? 64 : -64) : 0;
+          return <g key={key}><path className="collab-message-edge" markerEnd={`url(#${arrowId})`} d={`M${sx} ${sy} C${sx + bend} ${middle} ${tx + bend} ${middle} ${tx} ${ty}`} /><text className="collab-edge-count" x={(sx + tx) / 2 + bend * .75} y={sameRow ? middle - 8 : middle - 5} textAnchor="middle">{route.count} 条</text></g>;
+        })}
+      </svg>
+      {layout.nodes.map(({ session: value, x, y }) => <div className="collab-graph-node" key={value.id} style={{ left: x, top: y }}>
+        <AgentNode value={value} current={value.id === currentId} selected={value.id === selectedId} onSelect={() => onSelect(value.id)} />
+        {(value.childCount ?? layout.edges.filter(edge => edge.parentId === value.id).length) > 0 && <button type="button" className="collab-expand" aria-label={`${expanded.has(value.id) ? '收起' : '展开'}${sessionDisplayName(value)}的子代理`} aria-expanded={expanded.has(value.id)} onClick={() => onToggle(value.id)}>
+          {loading.has(value.id) ? <LoaderCircle size={12} className="spin" /> : expanded.has(value.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}{value.childCount ?? '下级'}
+        </button>}
+      </div>)}
+    </div>
+  </div>;
+}
 
-  return <details className={`collab-section collab-messages ${sectionFrame}`} open>
-    <summary className={sectionHeading}><ChevronRight size={14} className="group-open/section:rotate-90" aria-hidden="true" /><strong className="font-semibold text-[var(--text)]">协作消息</strong><span className="ml-auto text-[12px] text-[var(--muted)]">{messages.length.toLocaleString('zh-CN')} 条</span></summary>
-    <p className={`collab-note ${noteText}`}>仅展示当前会话日志中的消息。发送者 → 接收任务；任务标识与会话的对应关系未记录。</p>
-    {messages.length === 0 ? <p className="collab-empty mt-3 text-[14px] leading-relaxed text-[var(--muted)]">这份日志没有可识别的协作消息。</p> : <>
-      <div className="collab-message-controls mb-2 flex flex-wrap items-center justify-between gap-2.5 text-[12px] text-[var(--muted)]">
-        <span>按日志顺序 · 显示 {start + 1}–{messages.length} / {messages.length} 条</span>
-        {start > 0 && <button className={`text-button ${textAction}`} type="button" onClick={() => setVisibleCount(count => count + 12)}>显示更早消息</button>}
+function CompactTree({ layout, currentId, selectedId, expanded, onSelect, onToggle }: {
+  layout: Layout; currentId: string; selectedId: string; expanded: ReadonlySet<string>; onSelect: (id: string) => void; onToggle: (id: string) => void;
+}) {
+  return <ol className="collab-compact-tree" aria-label="代理关系树">{layout.nodes.map(({ session: value, depth }) => <li key={value.id} style={{ paddingLeft: Math.min(depth, 5) * 14 }}>
+    {(value.childCount ?? layout.edges.filter(edge => edge.parentId === value.id).length) > 0
+      ? <button type="button" className="collab-tree-toggle" aria-label={`${expanded.has(value.id) ? '收起' : '展开'}${sessionDisplayName(value)}的子代理`} aria-expanded={expanded.has(value.id)} onClick={() => onToggle(value.id)}>{expanded.has(value.id) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
+      : <span className="collab-tree-spacer" />}
+    <AgentNode value={value} current={value.id === currentId} selected={value.id === selectedId} onSelect={() => onSelect(value.id)} />
+  </li>)}</ol>;
+}
+
+function CollaborationTimeline({ layout, entries, messages, selectedId, expanded, onToggle, onSelect, onMessage, onNavigate }: {
+  layout: Layout; entries: CollaborationEntry[]; messages: CollaborationRecord[]; selectedId: string;
+  expanded: ReadonlySet<string>; onToggle: (id: string) => void;
+  onSelect: (id: string) => void; onMessage: (messages: CollaborationRecord[]) => void; onNavigate: (sessionId: string, turnId: string) => void;
+}) {
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const [trackWidth, setTrackWidth] = useState(0);
+  useEffect(() => {
+    const track = timelineRef.current?.querySelector('.collab-lane-track');
+    if (!track) return;
+    const observer = new ResizeObserver(([entry]) => setTrackWidth(entry.contentRect.width));
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, []);
+  const visible = new Set(layout.nodes.map(node => node.session.id));
+  const rounds = collaborationRounds(entries).filter(item => visible.has(item.sessionId));
+  const times = [...rounds.flatMap(({ turn }) => [Date.parse(turn.startedAt), Date.parse(turn.endedAt ?? '')]), ...messages.filter(message => visible.has(message.sessionId)).map(message => Date.parse(message.timestamp))].filter(Number.isFinite);
+  const start = times.length ? Math.min(...times) : 0, end = times.length ? Math.max(...times) : 0, range = Math.max(1, end - start);
+  const position = (value: string) => (Date.parse(value) - start) / range * 100;
+  const unknown = messages.filter(message => !Number.isFinite(Date.parse(message.timestamp))).length;
+  function messageGroups(sessionId: string) {
+    const groups: CollaborationRecord[][] = [];
+    for (const message of messages.filter(item => item.sessionId === sessionId && Number.isFinite(Date.parse(item.timestamp)))) {
+      const group = groups.at(-1);
+      if (group && (position(message.timestamp) - position(group[0].timestamp)) * trackWidth / 100 < 44) group.push(message);
+      else groups.push([message]);
+    }
+    return groups;
+  }
+  return <div className="collab-timeline" ref={timelineRef}>
+    {times.length > 0 ? <div className="collab-time-axis">{(end > start ? [0, 1, 2, 3] : [0]).map(tick => <time key={tick}>{new Date(start + (end - start) * tick / 3).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', ...(range < 120000 ? { second: '2-digit' } : {}), hour12: false })}</time>)}</div> : <p className="collab-empty">尚无带时间戳的活动记录。</p>}
+    {layout.nodes.map(({ session: value, depth }) => <div className={`collab-lane ${selectedId === value.id ? 'selected' : ''}`} key={value.id}>
+      <div className="collab-lane-heading" style={{ paddingLeft: Math.min(depth, 4) * 8 }}>{(value.childCount ?? 0) > 0 && <button type="button" className="collab-tree-toggle" aria-label={`${expanded.has(value.id) ? '收起' : '展开'}${sessionDisplayName(value)}的子代理`} aria-expanded={expanded.has(value.id)} onClick={() => onToggle(value.id)}>{expanded.has(value.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>}<button type="button" className="collab-lane-label" aria-pressed={selectedId === value.id} title={sessionTooltip(value)} onClick={() => onSelect(value.id)}>{depth > 0 && <GitBranch size={12} />}<span>{sessionDisplayName(value)}</span></button></div>
+      <div className="collab-lane-track">
+        {rounds.filter(item => item.sessionId === value.id && Number.isFinite(Date.parse(item.turn.startedAt))).map(({ turn }) => {
+          const from = position(turn.startedAt), to = turn.endedAt ? position(turn.endedAt) : from;
+          const bounded = Number.isFinite(to) && to > from;
+          return <button type="button" key={turn.id} className={`collab-round ${bounded ? '' : 'point'}`} style={{ left: `${from}%`, width: bounded ? `${to - from}%` : undefined }} aria-label={`${sessionDisplayName(value)} 第 ${turn.index + 1} 轮，${clock(turn.startedAt)}${bounded ? `–${clock(turn.endedAt!)}` : '，结束时间未记录'}`} onClick={() => onNavigate(value.id, turn.id)} />;
+        })}
+        {messageGroups(value.id).map(group => <button key={`${group[0].sessionId}:${group[0].id}`} type="button" className={`collab-message-point ${group.length > 1 ? 'grouped' : ''}`} style={{ left: `${position(group[0].timestamp)}%` }} title={group.map(message => `${clock(message.timestamp)} · ${message.sender} → ${message.taskName}`).join('\n')} aria-label={`${clock(group[0].timestamp)} ${group.length} 条协作消息`} onClick={() => onMessage(group)}>{group.length > 1 && <span>{group.length}</span>}</button>)}
       </div>
-      <ol className="collab-message-list m-0 list-none space-y-2 p-0" start={start + 1}>
-        {messages.slice(start).map(message => <li key={message.id}>
-          <button className="collab-message flex w-full min-w-0 flex-col gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] p-3 text-left text-[var(--soft)] hover:border-[var(--control)] hover:bg-[var(--hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]" type="button" onClick={() => onNavigateTurn(message.turnId)}>
-            <span className="collab-message-heading flex flex-wrap items-center gap-2 text-[12px] text-[var(--muted)]">
-              <span className={`collab-message-type flex-none rounded border px-1.5 py-0.5 whitespace-nowrap ${message.messageType === 'FINAL_ANSWER' ? 'final border-transparent bg-[var(--accent-light)] text-[var(--accent-strong)]' : 'border-[var(--border)]'}`}>{collaborationTypeLabels[message.messageType]}</span>
-              <time className="tabular-nums" dateTime={message.timestamp} title={message.timestamp}>{dateGroup(message.timestamp)} {clock(message.timestamp)}</time>
-              <span className="collab-message-target ml-auto flex items-center gap-1 whitespace-nowrap">{turnNumbers.has(message.turnId) ? `第 ${turnNumbers.get(message.turnId)} 轮` : '来源轮次'}<ArrowUpRight size={12} aria-hidden="true" /></span>
-            </span>
-            <span className="collab-message-route flex min-w-0 flex-wrap items-center gap-2 text-[var(--soft)]"><code className="min-w-0 font-mono text-[12px] leading-relaxed [overflow-wrap:anywhere]">{message.sender || '发送者未记录'}</code><ArrowRight size={12} aria-hidden="true" /><code className="min-w-0 font-mono text-[12px] leading-relaxed [overflow-wrap:anywhere]">{message.taskName || '接收任务未记录'}</code></span>
-            <span className="collab-message-preview text-[14px] leading-[1.75] whitespace-pre-wrap [overflow-wrap:anywhere]">{message.preview || '消息没有正文预览。'}</span>
-          </button>
-        </li>)}
-      </ol>
-      <p className={`collab-note mt-3 ${noteText}`}>点击消息定位原轮次，再展开协作卡片阅读完整内容。</p>
-    </>}
-  </details>;
+    </div>)}
+    <p className="collab-note">片段仅表示已记录的轮次，空白不代表等待。{unknown > 0 && `另有 ${unknown} 条消息未记录时间。`}</p>
+  </div>;
 }
 
 export function CollaborationView({ session, activity, onSelectSession, onNavigateTurn }: {
-  session: SessionDetail;
-  activity: SessionActivity;
-  onSelectSession: (session: SessionSummary) => void;
-  onNavigateTurn: (turnId: string) => void;
+  session: SessionDetail; activity: SessionActivity; onSelectSession: (session: SessionSummary) => void; onNavigateTurn: (turnId: string) => void;
 }) {
-  const [visibleChildren, setVisibleChildren] = useState(4);
-  return <section className="collaboration-view min-w-0 text-[var(--soft)]" aria-label="子代理协作视图">
-    <div className="collab-view-heading mb-5 flex flex-wrap items-center gap-2 text-[var(--accent-strong)]"><UsersRound size={17} aria-hidden="true" /><h2 className="m-0 text-[16px] font-semibold text-[var(--text)]">子代理协作</h2><span className="ml-auto text-[12px] text-[var(--muted)]">{session.children.length} 个直接子会话</span></div>
-    <details className={`collab-section collab-relationships ${sectionFrame}`} open>
-      <summary className={sectionHeading}><ChevronRight size={14} className="group-open/section:rotate-90" aria-hidden="true" /><strong className="font-semibold text-[var(--text)]">会话关系</strong><span className="ml-auto text-[12px] text-[var(--muted)]">父 → 当前 → 子</span></summary>
-      <p className={`collab-note ${noteText}`}>各会话用量独立展示，父子用量不相加。</p>
-      <ol className="collab-session-tree m-0 list-none space-y-2 p-0">
-        {session.parent ? <li><SessionNode value={session.parent} relation="父会话" onSelect={onSelectSession} /></li> : session.session.parentId && <li className="collab-missing-parent flex flex-wrap gap-x-3 gap-y-1.5 py-1 text-[12px] text-[var(--muted)] [overflow-wrap:anywhere]"><span>父会话尚未索引</span><code className="font-mono text-[12px]">{session.session.parentId}</code></li>}
-        <li>
-          <SessionNode value={session.session} relation="当前会话" current onSelect={onSelectSession} />
-          {session.children.length > 0 ? <><ul className="mt-2.5 ml-3 list-none border-l border-[var(--border)] p-0 pl-4 max-[560px]:ml-1.5 max-[560px]:pl-3">{session.children.slice(0, visibleChildren).map(child => <li className="relative my-2" key={child.id}><SessionNode value={child} relation="子会话" onSelect={onSelectSession} /></li>)}</ul>{visibleChildren < session.children.length && <button className={`text-button collab-children-more mt-1 ml-7 ${textAction}`} type="button" onClick={() => setVisibleChildren(count => count + 12)}>显示更多子会话（{visibleChildren} / {session.children.length}）</button>}{visibleChildren > 4 && <button className={`text-button collab-children-more mt-1 ml-7 ${textAction}`} type="button" onClick={() => setVisibleChildren(4)}>收起子会话</button>}</> : <p className="collab-empty mt-3 flex items-center gap-2 text-[14px] leading-relaxed text-[var(--muted)]"><GitBranch size={13} aria-hidden="true" />没有已索引的直接子会话。</p>}
-        </li>
-      </ol>
-    </details>
-    <MessageList key={session.session.id} messages={activity.messages} session={session} onNavigateTurn={onNavigateTurn} />
+  const { entries, sessions, loading, errors, load, refresh } = useCollaboration(session, activity);
+  const [saved] = useState(() => window.history.state?.collaboration as { selectedId?: string; expanded?: string[]; mode?: string; showMessages?: boolean } | undefined);
+  const [selectedId, setSelectedId] = useState(saved?.selectedId ?? session.session.id);
+  const [expanded, setExpanded] = useState(() => new Set(saved?.expanded ?? [session.session.id, ...(session.parent ? [session.parent.id] : [])]));
+  const [mode, setMode] = useState<'graph' | 'timeline'>(saved?.mode === 'timeline' ? 'timeline' : 'graph');
+  const [showMessages, setShowMessages] = useState(saved?.showMessages ?? true);
+  const [focusedKeys, setFocusedKeys] = useState<string[]>([]);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const inspectorRef = useRef<HTMLElement>(null);
+  const tree = useMemo(() => buildSessionTree(sessions), [sessions]);
+  const layout = useMemo(() => layoutCollaborationTree(tree, expanded), [tree, expanded]);
+  const messages = useMemo(() => collectCollaborationMessages(entries, sessions), [entries, sessions]);
+  const focusedMessages = useMemo(() => {
+    const keys = new Set(focusedKeys);
+    return messages.filter(message => keys.has(messageKey(message)));
+  }, [messages, focusedKeys]);
+  const labels = useMemo(() => createParticipantLabels(sessions), [sessions]);
+  const selected = tree.byId.get(selectedId)?.session ?? session.session;
+  const selectedEntry = entries.find(entry => entry.detail.session.id === selected.id);
+  const related = messages.filter(message => message.senderId === selected.id || message.recipientId === selected.id);
+  const unlinked = messages.filter(message => !message.senderId || !message.recipientId);
+  const selectedParent = tree.parents.get(selected.id);
+  const rootMissing = layout.nodes.find(node => node.session.parentId && !tree.byId.has(node.session.parentId));
+
+  useEffect(() => {
+    for (const id of expanded) load(id);
+    load(selectedId);
+  }, [expanded, selectedId, load]);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('session') === session.session.id) {
+      window.history.replaceState({ ...window.history.state, collaboration: { selectedId, expanded: [...expanded], mode, showMessages } }, '', window.location.href);
+    }
+  }, [session.session.id, selectedId, expanded, mode, showMessages]);
+
+  function select(id: string) {
+    setSelectedId(id); setFocusedKeys([]); load(id);
+    if (window.matchMedia('(max-width:600px)').matches) requestAnimationFrame(() => inspectorRef.current?.scrollIntoView({ block: 'start' }));
+  }
+  function toggle(id: string) {
+    setExpanded(previous => { const next = new Set(previous); next.has(id) ? next.delete(id) : next.add(id); return next; });
+    if (!expanded.has(id)) load(id);
+  }
+  function navigate(sessionId: string, turnId: string) {
+    if (sessionId === session.session.id) onNavigateTurn(turnId);
+    else { const target = tree.byId.get(sessionId)?.session; if (target) onSelectSession({ ...target, match: { turnId, excerpt: '' } }); }
+  }
+  function focusMessages(records: CollaborationRecord[]) {
+    const message = records[0];
+    const id = records.every(record => record.senderId === selected.id || record.recipientId === selected.id)
+      ? selected.id : message.sessionId;
+    setExpanded(previous => new Set([...previous, ...sessionAncestors(tree, id)]));
+    setSelectedId(id); setFocusedKeys(records.map(messageKey)); load(id);
+  }
+
+  return <section className="collaboration-view" aria-label="子代理协作视图">
+    <div className="collab-view-heading"><UsersRound size={17} aria-hidden="true" /><h2>子代理协作</h2><span>{sessions.length} 个已载入会话</span><button type="button" className="icon-button" aria-label="刷新协作记录" onClick={refresh}><RefreshCw size={14} /></button></div>
+    <div className="collab-workspace">
+      <div className="collab-toolbar"><div className="collab-view-switch" aria-label="协作布局">{([['graph', '关系总览'], ['timeline', '树形时序']] as const).map(([id, label]) => <button type="button" key={id} aria-pressed={mode === id} onClick={() => setMode(id)}>{label}</button>)}</div>{mode === 'graph' && <label className="collab-message-toggle"><input type="checkbox" checked={showMessages} onChange={event => setShowMessages(event.target.checked)} />消息连线</label>}</div>
+      <div className="collab-body">
+        <div className="collab-canvas" ref={canvasRef}>
+          <div className="collab-legend"><span><i />{mode === 'graph' ? '父子关系' : '已记录轮次'}</span><span><i className={mode === 'graph' ? 'message' : 'point'} />{mode === 'graph' ? '选中代理的消息 →' : '协作消息'}</span></div>
+          {rootMissing && <p className="collab-note">父会话尚未索引：<code>{rootMissing.session.parentId}</code></p>}
+          {mode === 'graph' ? <>
+            <RelationshipGraph layout={layout} currentId={session.session.id} selectedId={selected.id} ancestors={sessionAncestors(tree, selected.id)} expanded={expanded} messages={showMessages ? messages : []} loading={loading} onSelect={select} onToggle={toggle} />
+            <CompactTree layout={layout} currentId={session.session.id} selectedId={selected.id} expanded={expanded} onSelect={select} onToggle={toggle} />
+          </> : <CollaborationTimeline layout={layout} entries={entries} messages={messages} selectedId={selected.id} expanded={expanded} onToggle={toggle} onSelect={select} onMessage={focusMessages} onNavigate={navigate} />}
+          {layout.nodes.filter(node => node.session.id !== selected.id && errors.has(node.session.id)).map(node => <p className="inline-error" role="alert" key={node.session.id}>{sessionDisplayName(node.session)}：{errors.get(node.session.id)}<button type="button" onClick={() => load(node.session.id)}>重试</button></p>)}
+          <p className="collab-note">{mode === 'graph' ? '选择节点查看任务与消息，展开下级按需载入。' : '选择代理载入其轮次，点击片段定位原始记录。'}</p>
+        </div>
+        <aside className="collab-inspector" aria-label="代理详情" ref={inspectorRef}>
+          <button type="button" className="text-button collab-back-to-tree" onClick={() => canvasRef.current?.scrollIntoView({ block: 'start' })}>返回关系<ChevronRight size={12} /></button>
+          <span className="collab-detail-label">选中代理</span><h3>{sessionDisplayName(selected)}</h3>
+          <code className="collab-detail-path">{selected.agentName || selected.id}</code>
+          <div className="collab-agent-summary"><span>{exactTokens(selected.usage.tokens?.totalTokens)} tokens</span><span>{selected.turnCount ? `本轮${statusLabels[selected.status]}` : '暂无轮次'}</span></div>
+          <details className="collab-task-description" key={`task-${selected.id}`}><summary><span>{selectedEntry?.detail.turns[0]?.prompt || selected.title || '任务说明未记录。'}</span><ChevronDown size={12} aria-hidden="true" /></summary></details>
+          <details className="collab-agent-info" key={`info-${selected.id}`}><summary>更多信息<ChevronDown size={12} aria-hidden="true" /></summary><dl className="collab-detail-meta"><dt>派生自</dt><dd>{selectedParent ? sessionDisplayName(tree.byId.get(selectedParent)!.session) : selected.parentId ? '尚未索引' : '—'}</dd><dt>模型调用</dt><dd>{selected.usage.completeness === 'unknown' ? '未记录' : `${selected.usage.completeness === 'partial' ? '≥ ' : ''}${selected.usage.requestCount.toLocaleString('zh-CN')} 次`}</dd><dt>模型</dt><dd>{selected.model || '未记录'}</dd></dl></details>
+          {selected.usage.completeness !== 'complete' && <p className="collab-note">{selected.usage.completeness === 'partial' ? '用量记录不完整。' : '用量尚未记录。'}</p>}
+          {selected.id !== session.session.id && <button className="text-button collab-open-session" type="button" onClick={() => onSelectSession(selected)}>打开会话<ArrowUpRight size={13} /></button>}
+          {loading.has(selected.id) && <p className="turn-loading" role="status"><LoaderCircle size={14} className="spin" />正在读取此代理…</p>}
+          {errors.has(selected.id) && <p className="inline-error" role="alert">{errors.get(selected.id)}<button type="button" onClick={() => load(selected.id)}>重试</button></p>}
+          <CollaborationMessages key={`messages-${selected.id}`} messages={related} selectedId={selected.id} labels={labels} focused={focusedMessages} onClearFocus={() => setFocusedKeys([])} onNavigate={navigate} emptyText={selectedEntry ? '已读取日志中没有可关联到此代理的消息。' : '正在读取此代理的协作记录。'} />
+        </aside>
+      </div>
+      <div className="collab-footer"><span>仅关联明确的任务路径 · 各会话用量独立</span><span>轮次完成不代表代理结束</span></div>
+    </div>
+    <details className="collab-unlinked"><summary>未关联消息 <span>{unlinked.length} 条</span></summary><p className="collab-note">至少一端尚未匹配到已载入会话。展开预览可查看原始任务路径，“查看原文”可定位来源轮次。</p><CollaborationMessages messages={unlinked} labels={labels} onNavigate={navigate} /></details>
   </section>;
 }

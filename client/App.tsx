@@ -19,6 +19,12 @@ function readLocation() {
 }
 
 type Theme = 'system' | 'dark' | 'light';
+type SessionView = 'conversation' | 'tokens' | 'collaboration';
+
+function readSessionView(): SessionView {
+  const value = window.history.state?.sessionView;
+  return value === 'tokens' || value === 'collaboration' ? value : 'conversation';
+}
 
 function initialTheme(): Theme {
   try { const value = localStorage.getItem('session-lens-theme'); return value === 'dark' || value === 'light' ? value : 'system'; } catch { return 'system'; }
@@ -135,6 +141,7 @@ export function App() {
     function onEvent(event: MessageEvent) {
       let data: LiveEvent;
       try { data = JSON.parse(event.data) as LiveEvent; } catch { return; }
+      window.dispatchEvent(new CustomEvent('session-lens:change', { detail: data }));
       if (data.progress) setSessions(previous => previous ? { ...previous, progress: data.progress as IndexProgress } : previous);
       if (data.type === 'ready' || data.type === 'session-changed' && (!data.sessionId || data.sessionId === locationRef.current.session)) {
         if (!sessionTimer) sessionTimer = setTimeout(() => { sessionTimer = undefined; setSessionVersion(value => value + 1); }, 900);
@@ -202,7 +209,11 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
   const [newContent, setNewContent] = useState(false);
   const previousRevision = useRef(session.session.revision);
   const [showToolSearch, setShowToolSearch] = useState(false);
-  const [view, setView] = useState<'conversation' | 'tokens' | 'collaboration'>('conversation');
+  const [view, setViewState] = useState<SessionView>(readSessionView);
+  const setView = (next: SessionView) => {
+    setViewState(next);
+    window.history.replaceState({ ...window.history.state, sessionView: next }, '', window.location.href);
+  };
   const [toolQuery, setToolQuery] = useState('');
   const [matches, setMatches] = useState<{ turnId: string; eventId: string; text: string }[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -215,7 +226,7 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
       previousRevision.current = session.session.revision;
     }
   }, [session.session.revision]);
-  useEffect(() => { if (targetTurn) { atBottom.current = false; setView('conversation'); } }, [targetTurn, navigationVersion]);
+  useEffect(() => { if (targetTurn) atBottom.current = false; setViewState(readSessionView()); }, [targetTurn, navigationVersion]);
   useEffect(() => () => searchController.current?.abort(), []);
   async function searchTools(event: React.FormEvent) {
     event.preventDefault(); if (!toolQuery.trim()) return;
