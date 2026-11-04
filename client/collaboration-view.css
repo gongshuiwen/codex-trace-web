@@ -1,11 +1,9 @@
 .collaboration-view { min-width:0; color:var(--soft); --collab-message:#376384; }
 :root[data-theme=dark] .collaboration-view { --collab-message:#a8c8e0; }
-.collab-view-heading { display:flex; align-items:center; gap:8px; margin-bottom:16px; }
-.collab-view-heading > svg { color:var(--accent-strong); }
-.collab-view-heading h2 { margin:0; font-size:16px; font-weight:600; color:var(--text); }
-.collab-view-heading > span { margin-left:auto; color:var(--muted); font-size:12px; }
 .collab-workspace { border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--panel); }
 .collab-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; border-bottom:1px solid var(--border); padding:10px 16px; }
+.collab-toolbar-summary { display:flex; align-items:center; flex-wrap:wrap; gap:8px 16px; margin-left:auto; }
+.collab-session-count { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .collab-view-switch { display:flex; gap:4px; }
 .collab-view-switch button { min-height:36px; border:0; border-radius:6px; padding:6px 12px; color:var(--muted); background:transparent; font-size:13px; }
 .collab-view-switch button[aria-pressed=true] { color:var(--text); background:var(--hover); font-weight:600; }
@@ -39,8 +37,7 @@
 .collab-compact-tree { display:none; list-style:none; margin:0; padding:0; }
 .collab-inspector { min-width:0; padding:20px; border-left:1px solid var(--border); }
 .collab-back-to-tree { display:none; }
-.collab-detail-label { font-size:12px; color:var(--muted); }
-.collab-inspector h3 { margin:4px 0 6px; font-size:16px; font-weight:600; color:var(--text); overflow-wrap:anywhere; }
+.collab-inspector h3 { margin:0 0 6px; font-size:16px; font-weight:600; color:var(--text); overflow-wrap:anywhere; }
 .collab-detail-path { display:block; font-size:12px; line-height:1.8; color:var(--muted); overflow-wrap:anywhere; }
 .collab-agent-summary { display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:10px; color:var(--soft); font-size:12px; font-variant-numeric:tabular-nums; }
 .collab-task-description { margin-top:12px; font-size:13px; line-height:1.8; }
@@ -90,7 +87,14 @@
 .collab-messages > li.highlighted .collab-message-heading time,.collab-messages > li.highlighted .collab-message-meta,.collab-messages > li.highlighted .collab-preview-note,.collab-messages > li.highlighted .collab-message-paths dt { color:var(--soft); }
 .collab-note,.collab-empty { font-size:12px; color:var(--muted); line-height:1.8; margin:14px 0 0; overflow-wrap:anywhere; }
 .collab-empty { padding:12px 0; font-size:13px; }
-.collab-footer { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 16px; border-top:1px solid var(--border); padding:12px 16px; font-size:12px; color:var(--muted); }
+.collab-view-help { border-top:1px solid var(--border); padding:0 16px; color:var(--muted); font-size:12px; line-height:1.8; }
+.collab-view-help > summary { display:flex; align-items:center; gap:6px; width:fit-content; min-height:40px; list-style:none; cursor:pointer; }
+.collab-view-help > summary::-webkit-details-marker { display:none; }
+.collab-view-help[open] > summary > svg { transform:rotate(90deg); }
+.collab-view-help > summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.collab-view-help > div { padding-bottom:12px; }
+.collab-view-help p { margin:0; }
+.collab-view-help p + p { margin-top:6px; }
 .collab-unlinked { margin-top:16px; padding:0 16px 16px; border:1px solid var(--border); border-radius:8px; background:var(--panel); }
 .collab-unlinked:not([open]) { padding-bottom:0; }
 .collab-unlinked > summary { padding:14px 0; font-size:14px; cursor:pointer; color:var(--text); }
@@ -121,7 +125,9 @@
   .collab-back-to-tree { display:inline-flex; margin-bottom:8px; }
   .collab-message-filters button,.collab-agent-info > summary,.collab-message-meta,.collab-view-source { min-height:44px; }
   .collab-message-disclosure[open] { padding-bottom:44px; }
-  .collab-view-heading { flex-wrap:wrap; gap:6px; }
+  .collab-toolbar-summary { gap:4px 12px; }
+  .collab-view-help { padding-inline:12px; }
+  .collab-view-help > summary { min-height:44px; }
   .collab-graph-scroll { display:none; }
   .collab-compact-tree { display:block; }
   .collab-compact-tree li { display:flex; align-items:center; min-width:0; margin:8px 0; }

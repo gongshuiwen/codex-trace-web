@@ -399,11 +399,10 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
       <SessionStats usage={value.usage} toolCount={value.toolCount} toolFailureCount={value.toolFailureCount} durationMs={value.durationMs} compactionCount={value.compactionCount} onDetails={inspectUsage} onLayoutChange={reading.preserveLayout} />
     </header>
     <div className="timeline-toolbar flex min-h-11 shrink-0 items-center justify-between gap-3 border-y border-[var(--border)] bg-[var(--panel)] px-[var(--canvas-pad)]">
-      <div className="timeline-view-buttons flex items-center gap-2" aria-label="会话视图">{([['conversation', '对话'], ['tokens', 'Token 与压缩'], ['collaboration', '子代理协作']] as const).map(([id, label]) => <button key={id} type="button" className={`min-h-8 rounded-md px-3 py-1.5 text-[13px] transition-colors max-[600px]:min-h-11 max-[600px]:px-2 ${view === id ? 'bg-[var(--accent-light)] font-medium text-[var(--accent-strong)]' : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]'}`} aria-pressed={view === id} onClick={() => { reading.cancelNavigation(); setView(id); }}>{label}</button>)}</div>
+      <div className="timeline-view-buttons flex items-center gap-2" aria-label="会话视图">{([['conversation', '对话'], ['tokens', 'Token 与压缩'], ['collaboration', '子代理协作']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={view === id} onClick={() => { reading.cancelNavigation(); setView(id); }}>{label}</button>)}</div>
       {view === 'conversation' && <div className="timeline-tool-actions">
         <div className="conversation-mode-desktop">{modeControl}</div>
         <button type="button" className="turn-directory-trigger icon-button" title="轮次目录" aria-label="轮次目录" aria-haspopup="dialog" aria-expanded={showTurnDirectory} aria-controls="turn-directory-dialog" onClick={() => setShowTurnDirectory(true)}><ListOrdered size={17} /></button>
-        <div className="timeline-tool-bulk">{bulkToolActions}</div>
         <details className="timeline-tools-menu" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }} onKeyDown={event => {
           if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); }
         }}>

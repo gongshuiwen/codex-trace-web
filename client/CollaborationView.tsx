@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ArrowUpRight, ChevronDown, ChevronRight, GitBranch, LoaderCircle, RefreshCw, UsersRound } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, ChevronRight, GitBranch, LoaderCircle, RefreshCw } from 'lucide-react';
 import type { SessionActivity, SessionDetail, SessionSummary } from '../shared/types';
 import { clock, exactTokens, sessionDisplayName, sessionTooltip, statusLabels } from './format';
 import { buildSessionTree, sessionAncestors } from './session-tree';
@@ -118,7 +118,7 @@ function CollaborationTimeline({ layout, entries, messages, selectedId, expanded
         {messageGroups(value.id).map(group => <button key={`${group[0].sessionId}:${group[0].id}`} type="button" className={`collab-message-point ${group.length > 1 ? 'grouped' : ''}`} style={{ left: `${position(group[0].timestamp)}%` }} title={group.map(message => `${clock(message.timestamp)} · ${message.sender} → ${message.taskName}`).join('\n')} aria-label={`${clock(group[0].timestamp)} ${group.length} 条协作消息`} onClick={() => onMessage(group)}>{group.length > 1 && <span>{group.length}</span>}</button>)}
       </div>
     </div>)}
-    <p className="collab-note">片段仅表示已记录的轮次，空白不代表等待。{unknown > 0 && `另有 ${unknown} 条消息未记录时间。`}</p>
+    {unknown > 0 && <p className="collab-note">另有 {unknown} 条消息未记录时间。</p>}
   </div>;
 }
 
@@ -181,9 +181,16 @@ export function CollaborationView({ session, activity, onSelectSession, onNaviga
   }
 
   return <section className="collaboration-view" aria-label="子代理协作视图">
-    <div className="collab-view-heading"><UsersRound size={17} aria-hidden="true" /><h2>子代理协作</h2><span>{sessions.length} 个已载入会话</span><button type="button" className="icon-button" aria-label="刷新协作记录" onClick={refresh}><RefreshCw size={14} /></button></div>
+    <h2 className="sr-only">子代理协作</h2>
     <div className="collab-workspace">
-      <div className="collab-toolbar"><div className="collab-view-switch" aria-label="协作布局">{([['graph', '关系总览'], ['timeline', '树形时序']] as const).map(([id, label]) => <button type="button" key={id} aria-pressed={mode === id} onClick={() => setMode(id)}>{label}</button>)}</div>{mode === 'graph' && <label className="collab-message-toggle"><input type="checkbox" checked={showMessages} onChange={event => setShowMessages(event.target.checked)} />消息连线</label>}</div>
+      <div className="collab-toolbar">
+        <div className="collab-view-switch" aria-label="协作布局">{([['graph', '关系总览'], ['timeline', '树形时序']] as const).map(([id, label]) => <button type="button" key={id} aria-pressed={mode === id} onClick={() => setMode(id)}>{label}</button>)}</div>
+        <div className="collab-toolbar-summary">
+          {mode === 'graph' && <label className="collab-message-toggle"><input type="checkbox" checked={showMessages} onChange={event => setShowMessages(event.target.checked)} />消息连线</label>}
+          <span className="collab-session-count">已载入 {sessions.length} 个会话</span>
+          <button type="button" className="icon-button" aria-label="刷新协作记录" title="刷新协作记录" onClick={refresh}><RefreshCw size={14} /></button>
+        </div>
+      </div>
       <div className="collab-body">
         <div className="collab-canvas" ref={canvasRef}>
           <div className="collab-legend"><span><i />{mode === 'graph' ? '父子关系' : '已记录轮次'}</span><span><i className={mode === 'graph' ? 'message' : 'point'} />{mode === 'graph' ? '选中代理的消息 →' : '协作消息'}</span></div>
@@ -193,11 +200,10 @@ export function CollaborationView({ session, activity, onSelectSession, onNaviga
             <CompactTree layout={layout} currentId={session.session.id} selectedId={selected.id} expanded={expanded} onSelect={select} onToggle={toggle} />
           </> : <CollaborationTimeline layout={layout} entries={entries} messages={messages} selectedId={selected.id} expanded={expanded} onToggle={toggle} onSelect={select} onMessage={focusMessages} onNavigate={navigate} />}
           {layout.nodes.filter(node => node.session.id !== selected.id && errors.has(node.session.id)).map(node => <p className="inline-error" role="alert" key={node.session.id}>{sessionDisplayName(node.session)}：{errors.get(node.session.id)}<button type="button" onClick={() => load(node.session.id)}>重试</button></p>)}
-          <p className="collab-note">{mode === 'graph' ? '选择节点查看任务与消息，展开下级按需载入。' : '选择代理载入其轮次，点击片段定位原始记录。'}</p>
         </div>
         <aside className="collab-inspector" aria-label="代理详情" ref={inspectorRef}>
           <button type="button" className="text-button collab-back-to-tree" onClick={() => canvasRef.current?.scrollIntoView({ block: 'start' })}>返回关系<ChevronRight size={12} /></button>
-          <span className="collab-detail-label">选中代理</span><h3>{sessionDisplayName(selected)}</h3>
+          <h3>{sessionDisplayName(selected)}</h3>
           <code className="collab-detail-path">{selected.agentName || selected.id}</code>
           <div className="collab-agent-summary"><span>{exactTokens(selected.usage.tokens?.totalTokens)} tokens</span><span>{selected.turnCount ? `本轮${statusLabels[selected.status]}` : '暂无轮次'}</span></div>
           <details className="collab-task-description" key={`task-${selected.id}`}><summary><span>{selectedEntry?.detail.turns[0]?.prompt || selected.title || '任务说明未记录。'}</span><ChevronDown size={12} aria-hidden="true" /></summary></details>
@@ -209,7 +215,14 @@ export function CollaborationView({ session, activity, onSelectSession, onNaviga
           <CollaborationMessages key={`messages-${selected.id}`} messages={related} selectedId={selected.id} labels={labels} revisions={revisions} focused={focusedMessages} onClearFocus={() => setFocusedKeys([])} onNavigate={navigate} emptyText={selectedEntry ? '已读取日志中没有可关联到此代理的消息。' : '正在读取此代理的协作记录。'} />
         </aside>
       </div>
-      <div className="collab-footer"><span>仅关联明确的任务路径 · 各会话用量独立</span><span>轮次完成不代表代理结束</span></div>
+      <details className="collab-view-help">
+        <summary><ChevronRight size={13} aria-hidden="true" />视图说明</summary>
+        <div>
+          <p>{mode === 'graph' ? '选择节点查看任务与消息，展开下级按需载入。' : '选择代理载入其轮次，点击片段定位原始记录。'}</p>
+          <p>仅关联明确的任务路径，各会话用量独立，不叠加父子会话用量。</p>
+          <p>片段仅表示已记录的轮次，空白不代表等待；轮次完成不代表代理结束。</p>
+        </div>
+      </details>
     </div>
     <details className="collab-unlinked"><summary>未关联消息 <span>{unlinked.length} 条</span></summary><p className="collab-note">至少一端尚未匹配到已载入会话。展开全文可阅读完整消息和原始任务路径，“查看来源轮次”可定位原始记录。</p><CollaborationMessages messages={unlinked} labels={labels} revisions={revisions} onNavigate={navigate} /></details>
   </section>;

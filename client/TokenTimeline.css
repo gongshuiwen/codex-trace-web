@@ -1,6 +1,17 @@
 /* SVG marks share their colours with the HTML legend. Layout and controls use Tailwind. */
 .token-timeline{--token-output:#6888aa}
 :root[data-theme="dark"] .token-timeline{--token-output:#9ab4c9}
+.token-timeline-controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.token-timeline-summary{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin-left:auto}
+.token-record-count{margin:0;color:var(--muted);font-size:12px;line-height:20px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.token-timeline-note{margin-top:16px;color:var(--muted);font-size:12px;line-height:1.8}
+.token-timeline-note>summary{display:flex;align-items:center;gap:6px;width:fit-content;min-height:36px;list-style:none;cursor:pointer}
+.token-timeline-note>summary::-webkit-details-marker{display:none}
+.token-timeline-note>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.token-timeline-note[open]>summary>svg{transform:rotate(90deg)}
+.token-timeline-note p{margin:0}
+.token-timeline-note p+p{margin-top:6px}
+@media(max-width:560px){.token-timeline-controls{gap:8px}.token-timeline-summary{gap:8px 12px}.token-timeline-note>summary{min-height:44px}}
 .token-series-input{color:var(--accent-strong);stroke:var(--accent-strong)}
 .token-series-output{color:var(--token-output);stroke:var(--token-output)}
 .token-series-cache{color:var(--muted);stroke:var(--muted);stroke-dasharray:4 3}

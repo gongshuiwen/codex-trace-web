@@ -61,15 +61,41 @@ it('keeps independent SSE subscriptions and sends a fresh ready state on reconne
   const app = await createApp({ index: f.index, settings: f.settings });
   const connections: AbortController[] = [];
   const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
-  const read = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
-    let timer: ReturnType<typeof setTimeout>;
-    try {
-      const chunk = await Promise.race([
-        reader.read(),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('SSE delivery timeout')), 2000); }),
-      ]);
-      return new TextDecoder().decode(chunk.value);
-    } finally { clearTimeout(timer!); }
+  type Subscription = { reader: ReadableStreamDefaultReader<Uint8Array>; sessionId: string; decoder: TextDecoder; buffer: string };
+  const readEvent = async (subscription: Subscription, deadline = Date.now() + 2000): Promise<LiveEvent> => {
+    while (true) {
+      const separator = /\r?\n\r?\n/.exec(subscription.buffer);
+      if (separator) {
+        const frame = subscription.buffer.slice(0, separator.index);
+        subscription.buffer = subscription.buffer.slice(separator.index + separator[0].length);
+        const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, ''));
+        if (data.length) return JSON.parse(data.join('\n')) as LiveEvent;
+        continue; // Heartbeats are SSE comments, not application events.
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error('SSE delivery timeout');
+        const chunk = await Promise.race([
+          subscription.reader.read(),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('SSE delivery timeout')), remaining); }),
+        ]);
+        if (chunk.done) throw new Error('SSE stream ended before the expected event');
+        subscription.buffer += subscription.decoder.decode(chunk.value, { stream: true });
+      } finally { clearTimeout(timer); }
+    }
+  };
+  const readUntil = async (subscription: Subscription, matches: (event: LiveEvent) => boolean) => {
+    const deadline = Date.now() + 2000;
+    const events: LiveEvent[] = [];
+    while (true) {
+      const event = await readEvent(subscription, deadline);
+      // Global index events may arrive between session events. Never skip a
+      // leaked foreign session event while waiting for the requested one.
+      if (event.type === 'session-changed') expect(event.sessionId).toBe(subscription.sessionId);
+      events.push(event);
+      if (matches(event)) return events;
+    }
   };
   try {
     const url = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -79,23 +105,30 @@ it('keeps independent SSE subscriptions and sends a fresh ready state on reconne
       const response = await fetch(`${url}/api/events?sessionId=${sessionId}`, { signal: controller.signal });
       const reader = response.body!.getReader();
       readers.push(reader);
-      expect(await read(reader)).toContain('"type":"ready"');
-      return reader;
+      const subscription: Subscription = { reader, sessionId, decoder: new TextDecoder(), buffer: '' };
+      expect(await readEvent(subscription)).toMatchObject({ type: 'ready', progress: expect.any(Object) });
+      return subscription;
     };
     const first = await connect('first');
     const second = await connect('second');
     f.index.emit('change', { type: 'session-changed', sessionId: 'first', revision: 'one' } satisfies LiveEvent);
     f.index.emit('change', { type: 'session-changed', sessionId: 'second', revision: 'two' } satisfies LiveEvent);
-    const one = await read(first);
-    const two = await read(second);
-    expect(one).toContain('"sessionId":"first"');
-    expect(one).not.toContain('"sessionId":"second"');
-    expect(two).toContain('"sessionId":"second"');
-    expect(two).not.toContain('"sessionId":"first"');
-    await first.cancel();
+    // A shared boundary guarantees both streams have consumed the complete
+    // emitted interval, even when a foreign event would arrive in a later chunk.
+    const boundary = { type: 'sessions-changed', progress: { ...f.index.progress, message: 'SSE subscription boundary' } } satisfies LiveEvent;
+    f.index.emit('change', boundary);
+    const atBoundary = (event: LiveEvent) => event.type === 'sessions-changed' && event.progress?.message === boundary.progress.message;
+    const one = await readUntil(first, atBoundary);
+    const two = await readUntil(second, atBoundary);
+    expect(one).toContainEqual({ type: 'session-changed', sessionId: 'first', revision: 'one' });
+    expect(one).not.toContainEqual(expect.objectContaining({ sessionId: 'second' }));
+    expect(two).toContainEqual({ type: 'session-changed', sessionId: 'second', revision: 'two' });
+    expect(two).not.toContainEqual(expect.objectContaining({ sessionId: 'first' }));
+    await first.reader.cancel();
     const reconnected = await connect('first');
     f.index.emit('change', { type: 'session-changed', sessionId: 'first', revision: 'three' } satisfies LiveEvent);
-    expect(await read(reconnected)).toContain('"revision":"three"');
+    expect(await readUntil(reconnected, event => event.type === 'session-changed' && event.revision === 'three'))
+      .toContainEqual({ type: 'session-changed', sessionId: 'first', revision: 'three' });
   } finally {
     for (const controller of connections) controller.abort();
     await Promise.allSettled(readers.map(reader => reader.cancel()));

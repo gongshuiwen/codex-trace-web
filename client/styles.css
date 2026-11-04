@@ -14,6 +14,7 @@
   --shadow:0 12px 40px #1f32261c;
   --fs-small:12px; --fs-body:14px; --fs-section:16px; --fs-heading:18px; --fs-title:22px; --fs-kpi:24px;
   --canvas-pad:40px; --control-height:36px; --radius-card:8px; --radius-control:6px;
+  --reading-width:960px;
 }
 :root[data-theme="dark"] {
   color-scheme:dark;
@@ -28,7 +29,7 @@
 
 @layer base {
   html { font-family:var(--font-sans); font-size:16px; background:var(--bg); color:var(--text); }
-  body { margin:0; font-size:var(--fs-body); }
+  body { margin:0; font-size:var(--fs-body); line-height:1.6; }
   button,input,select,textarea { font:inherit; }
   button { cursor:pointer; }
   button:disabled { cursor:default; }
@@ -47,6 +48,7 @@
   .primary-button { @apply border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)] hover:brightness-110; }
   .secondary-button { @apply bg-[var(--panel)] text-[var(--soft)] hover:bg-[var(--hover)]; }
   .primary-button:disabled { @apply border-[var(--border)] bg-[var(--hover)] text-[var(--muted)] brightness-100; }
+  .secondary-button:disabled { opacity:.55; }
   .status-label { @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-[var(--muted)]; }
   .status-label.running,.status-label.completed,.tool-status.completed { color:var(--accent-strong); }
   .status-label.interrupted { color:var(--warning); }
@@ -292,6 +294,13 @@
   overflow-wrap: anywhere;
 }
 }
+
+.turn-card { max-width:calc(var(--reading-width) + var(--canvas-pad) * 2); margin-inline:auto; }
+.turn-card .assistant-event { line-height:1.8; }
+.turn-card .turn-heading-meta time { font-family:var(--font-sans); font-variant-numeric:tabular-nums; }
+.session-refresh-error { display:flex; flex:none; align-items:center; justify-content:space-between; gap:12px; padding:8px var(--canvas-pad); border-bottom:1px solid var(--border); background:color-mix(in srgb,var(--danger) 6%,var(--panel)); color:var(--danger); font-size:var(--fs-small); }
+.session-refresh-error > span { min-width:0; overflow-wrap:anywhere; }
+.session-refresh-error > button { flex-shrink:0; }
 
 .turn-card.target-turn { animation:turn-locate 1.8s ease-out; }
 .target-turn .turn-order { background:var(--accent-light); color:var(--accent-strong); }

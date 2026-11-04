@@ -140,6 +140,8 @@ export function DetailDrawer({ session, selection, onClose, onNavigateTurn }: { 
   }, [selection, activeTurn?.summary.id, displayedTurn?.summary.id, selectedRequestId, latestLoading, latestFallback, targetTurnId]);
   const tool = displayedTurn?.events.find(event => event.tool?.id === selection.toolId)?.tool;
   const presentation = tool ? toolPresentation(tool) : null;
+  const toolState = tool ? tool.status === 'failed' ? `失败${tool.exitCode != null ? ` · 退出码 ${tool.exitCode}` : ''}`
+    : tool.status === 'running' ? '运行中' : tool.status === 'unknown' ? '结果未记录' : tool.exitCode === 0 ? '完成' : '已返回' : null;
   function toggleToolStatistics(show: boolean) { setShowToolStatistics(show); requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' })); }
   function searchKeyboard(event: React.KeyboardEvent<HTMLElement>) {
     if (!searchNavigation || searchStale || event.defaultPrevented || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey) return;
@@ -156,7 +158,8 @@ export function DetailDrawer({ session, selection, onClose, onNavigateTurn }: { 
     <button className={`drawer-backdrop border-0 ${drawerModal ? 'fixed inset-0 z-[30] block bg-[#102318]/25' : 'hidden'}`} aria-label="关闭详情" tabIndex={-1} aria-hidden="true" onClick={onClose} />
     <aside ref={drawerRef} className={`detail-drawer z-[31] flex min-w-0 flex-col border-l border-(--border) bg-(--panel) text-(--text) ${toolMode && !showToolStatistics ? 'tool-reader-content-mode' : ''} ${toolMode ? 'tool-reader-drawer fixed inset-y-0 right-0 w-[800px] max-w-[calc(100vw-24px)] shadow-[-12px_0_40px_#14251a17] max-[600px]:w-full max-[600px]:max-w-none max-[600px]:border-l-0' : modal ? 'fixed inset-y-0 right-0 w-[360px] max-w-[calc(100vw-24px)] shadow-[-12px_0_40px_#14251a17] max-[560px]:w-full max-[560px]:max-w-none max-[560px]:border-l-0' : 'relative w-[354px] shrink-0'}`} role={drawerModal ? 'dialog' : undefined} aria-modal={drawerModal || undefined} aria-labelledby={titleId} tabIndex={-1} onKeyDown={searchKeyboard}>
       <div className="drawer-heading flex h-[76px] min-h-[76px] shrink-0 items-center justify-between gap-[16px] border-b border-(--border) px-[24px] max-[560px]:h-[68px] max-[560px]:min-h-[68px] max-[560px]:px-[20px]">
-        <h2 id={titleId} className="m-0 min-w-0 text-[18px] leading-[1.4] font-semibold">{selection.toolId ? showToolStatistics ? '调用所属轮次统计' : '调用详情' : latestMode ? exactLatestRequest ? '最近一次调用' : '最近输入摘要' : selection.turnId ? '轮次统计' : '会话统计'}</h2>
+        <h2 id={titleId} className="m-0 min-w-0 flex-1 text-[18px] leading-[1.4] font-semibold">{selection.toolId ? showToolStatistics ? '调用所属轮次统计' : <span className="flex min-w-0 items-center gap-2"><Code2 size={17} aria-hidden="true" /><span className="min-w-0 truncate" title={presentation?.title}>{presentation?.title || '调用详情'}</span></span> : latestMode ? exactLatestRequest ? '最近一次调用' : '最近输入摘要' : selection.turnId ? '轮次统计' : '会话统计'}</h2>
+        {tool && !showToolStatistics && <span className={`tool-call-state ${tool.status}`} role="status">{toolState}</span>}
         <button ref={closeRef} className="icon-button inline-flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-[6px] border-0 bg-transparent text-(--muted) hover:bg-(--hover) hover:text-(--text) max-[560px]:h-[44px] max-[560px]:w-[44px]" onClick={onClose} title="关闭详情 (Esc)" aria-label="关闭详情"><X size={18} /></button>
       </div>
       {toolMode && searchNavigation && <div className="tool-search-drawer-navigation">
@@ -171,10 +174,10 @@ export function DetailDrawer({ session, selection, onClose, onNavigateTurn }: { 
         {(latestLoading || targetTurnId && !activeTurn && !error) && <div className="turn-loading flex items-center gap-[8px] px-[24px] py-[16px] text-[12px] leading-[1.8] text-(--muted)" role="status">{latestMode ? '正在定位最近输入记录…' : '正在读取明细…'}</div>}
         {toolMode && !showToolStatistics && tool && presentation && <section className="tool-detail">
           <div className="tool-reader-heading">
-            <div className="tool-reader-title"><Code2 size={16} /><span>{presentation.title}</span><span className={`tool-call-state ${tool.status}`}>{tool.status === 'failed' ? `失败${tool.exitCode != null ? ` · 退出码 ${tool.exitCode}` : ''}` : tool.status === 'running' ? '运行中' : tool.status === 'unknown' ? '结果未记录' : tool.exitCode === 0 ? '完成' : '已返回'}</span></div>
             {presentation.subtitle && <p className="tool-reader-subtitle">{presentation.subtitle}</p>}
-            <p className="tool-reader-subtitle">调用 ID <code>{tool.id}</code></p>
-            <div className="tool-reader-context"><span>第 {(displayedTurn?.summary.index ?? 0) + 1} 轮 · 此工具没有独立 token 用量</span><button type="button" onClick={() => toggleToolStatistics(true)}>查看所属轮次统计</button></div>
+            <div className="tool-reader-context"><button type="button" onClick={() => toggleToolStatistics(true)} title="工具没有独立 token 用量；查看所属轮次的模型调用统计">第 {(displayedTurn?.summary.index ?? 0) + 1} 轮统计<ArrowUpRight size={13} aria-hidden="true" /></button>
+              <details className="tool-reader-info" key={tool.id}><summary>更多信息<ChevronDown size={12} aria-hidden="true" /></summary><dl><dt>工具</dt><dd><code>{tool.name}</code></dd><dt>调用 ID</dt><dd><code>{tool.id}</code></dd></dl><p>此工具没有独立 token 用量，用量归属所在轮次的模型调用。</p></details>
+            </div>
           </div>
           <ToolContent key={`${tool.id}:${selection.navigationId ?? ''}`} tool={tool} sessionId={session.session.id} revision={session.session.revision} search={selection.search} navigationId={selection.navigationId} mode="detail" />
         </section>}
@@ -195,6 +198,10 @@ export function DetailDrawer({ session, selection, onClose, onNavigateTurn }: { 
           {latestFallback && <p className="timeline-notice mx-[24px] my-[16px] rounded-[4px] border-l-2 border-(--warning) bg-(--bg) p-[12px] text-[12px] leading-[1.8] text-(--warning) [overflow-wrap:anywhere] max-[560px]:mx-[20px]" role="status">{latest?.failed ? '暂时无法读取调用记录。' : '日志没有提供可可靠关联的末次原始调用记录。'}当前展示会话摘要中的最近输入，不能定位对应单次调用。</p>}
           <UsageBlock usage={session.session.usage} label="整个会话用量" />
         </div>
+        <details className="usage-method border-b border-(--border) px-6 py-3 text-[12px] leading-5 text-(--muted)">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 text-(--soft) [&::-webkit-details-marker]:hidden max-[600px]:min-h-11">统计口径<ChevronDown size={13} aria-hidden="true" /></summary>
+          <div className="space-y-2 pt-2 pb-3"><p>缓存 token 包含在输入中；推理 token 包含在输出中，均不重复相加。</p><p>轮次用量汇总该轮的模型调用；整个会话用量不包含子会话。累计用量不等同于当前上下文长度。</p><p>最近输入和窗口比例对应最近一次记录，并非实时上下文占用。缺少记录显示未知，0 表示日志明确记录为零。</p><p>累计快照差值可能包含多个缺失调用，不能视为精确的单次调用。</p></div>
+        </details>
         <section className="session-properties p-[24px] max-[560px]:p-[20px]">
           <div className="detail-section-heading flex items-center gap-[8px] text-[14px] font-medium text-(--soft)"><Layers3 size={14} /><span>会话信息</span></div>
           <dl className="properties mt-[20px] mb-0 text-[12px] leading-[1.8]">

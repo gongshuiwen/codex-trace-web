@@ -1,9 +1,11 @@
-import { mkdtemp, mkdir, open, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { on } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../server/app.js';
 import { IndexService } from '../server/indexer.js';
+import type { LiveEvent } from '../shared/types.js';
 
 async function cleanup(root: string): Promise<void> {
   if (!path.resolve(root).startsWith(path.join(tmpdir(), 'session-lens-performance-'))) throw new Error('Unexpected cleanup target');
@@ -40,14 +42,31 @@ describe('large local rollouts', () => {
     } finally { await file.close(); }
     let index = new IndexService({ sessionsDir, dataDir });
     const app = await createApp({ index, settings: { sessionsDir, defaultSessionsDir: sessionsDir, dataDir } });
-    try {
-      await index.start();
+    const probe = async () => {
       const started = performance.now();
-      const health = await app.inject('/api/health');
+      const [health, initial] = await Promise.all([app.inject('/api/health'), index.list()]);
+      return { health, initial, elapsed: performance.now() - started };
+    };
+    const scanController = new AbortController();
+    const scanTimeout = setTimeout(() => scanController.abort(), 15000);
+    const duringScan = (async () => {
+      for await (const [event] of on(index, 'change', { signal: scanController.signal })) {
+        const update = event as LiveEvent;
+        if (update.type !== 'index-progress') continue;
+        if (update.progress?.status === 'error') throw new Error(update.progress.message || 'Index scan failed');
+        if (update.progress?.status !== 'scanning') continue;
+        // Launch on the scan-start event. By the time either query returns the
+        // Worker may legitimately have completed the scan, especially when the
+        // main thread is busy running the rest of the suite.
+        return probe();
+      }
+      throw new Error('Index scan ended without a scanning event');
+    })();
+    try {
+      const [, { health, initial, elapsed }] = await Promise.all([index.start(), duringScan]);
       expect(health.statusCode).toBe(200);
-      expect(performance.now() - started).toBeLessThan(2000);
-      const initial = await index.list();
-      expect(initial.progress.status).toBe('scanning');
+      expect(elapsed).toBeLessThan(2000);
+      expect(initial.progress.errors).toBe(0);
       await waitForReady(index);
       const result = await index.list({ query: '大型日志' });
       expect(result.items).toHaveLength(1);
@@ -71,6 +90,10 @@ describe('large local rollouts', () => {
       expect(cached.items[0]?.id).toBe('large-session');
       await waitForReady(index);
       expect(reparsed).toEqual([]);
-    } finally { await app.close(); await index.stop(); await cleanup(root); }
+    } finally {
+      clearTimeout(scanTimeout);
+      scanController.abort();
+      await app.close(); await index.stop(); await cleanup(root);
+    }
   }, 30000);
 });
