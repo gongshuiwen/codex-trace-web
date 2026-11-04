@@ -4,13 +4,12 @@ import type { ToolCall, ToolSearchLocation } from '../shared/types';
 import { prettyArguments } from './format';
 import { toolPresentation } from './tool-presentation';
 import { ToolResult } from './ToolResult';
-import { toolViewState, type ToolViewState } from './tool-view-state';
+import { toolTabState, type ToolTab as Tab } from './tool-view-state';
 import { useToolOutput } from './useToolOutput';
 import { outputWindowEnd, windowContainsSearch } from './tool-output-window';
 import './tool-card.css';
 import './tool-content.css';
 
-type Tab = ToolViewState['tab'];
 const tabs = [{ id: 'result', label: '关键结果' }, { id: 'arguments', label: '调用参数' }, { id: 'raw', label: '原始返回' }] as const;
 const completedNavigations = new Map<string, true>();
 
@@ -32,20 +31,18 @@ export function ToolSearchText({ text, offset = 0, search }: { text: string; off
   return <>{text.slice(0, start)}<mark data-tool-search-hit data-tool-search-offset={search.offset} tabIndex={-1}>{text.slice(start, end)}</mark>{text.slice(end)}</>;
 }
 
-export function ToolContent({ tool, sessionId, revision, search, navigationId = 0, mode = 'inline', onReady, preserveLayout }: {
+export function ToolContent({ tool, sessionId, revision, search, navigationId = 0 }: {
   tool: ToolCall; sessionId: string; revision: string; search?: ToolSearchLocation; navigationId?: number;
-  mode?: 'inline' | 'detail'; onReady?: () => void; preserveLayout?: (change: () => void) => void;
 }) {
   const toolKey = JSON.stringify([sessionId, tool.id]);
-  const navigationKey = search ? JSON.stringify([toolKey, mode, navigationId, search.field, search.offset, search.length, search.query, search.matchedText]) : '';
+  const navigationKey = search ? JSON.stringify([toolKey, navigationId, search.field, search.offset, search.length, search.query, search.matchedText]) : '';
   const [needsNavigation, setNeedsNavigation] = useState(() => Boolean(search && !completedNavigations.has(navigationKey)));
-  const [tab, setTab] = useState<Tab>(() => needsNavigation && search ? search.field === 'arguments' ? 'arguments' : 'raw' : toolViewState.get(sessionId, tool.id)?.tab ?? 'result');
+  const [tab, setTab] = useState<Tab>(() => needsNavigation && search ? search.field === 'arguments' ? 'arguments' : 'raw' : toolTabState.get(sessionId, tool.id) ?? 'result');
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState('');
   const panelId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const readyRef = useRef(onReady); readyRef.current = onReady;
   const restored = useRef('');
   const prepend = useRef<{ offset: number; height: number; top: number; markTop?: number } | null>(null);
   const output = useToolOutput({ tool, sessionId, revision, search: needsNavigation ? search : undefined });
@@ -60,15 +57,10 @@ export function ToolContent({ tool, sessionId, revision, search, navigationId = 
 
   useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
 
-  function selectTab(next: Tab, manual = true) {
-    const change = () => {
-      const previous = toolViewState.get(sessionId, tool.id);
-      toolViewState.set(sessionId, tool.id, { open: previous?.open ?? tool.status === 'failed', tab: next });
-      setTab(next); setCopied(false); setCopyError('');
-    };
-    if (manual && preserveLayout) preserveLayout(change); else change();
+  function selectTab(next: Tab) {
+    toolTabState.set(sessionId, tool.id, next);
+    setTab(next); setCopied(false); setCopyError('');
   }
-  useEffect(() => { if (needsNavigation && search) selectTab(search.field === 'arguments' ? 'arguments' : 'raw', false); }, [navigationKey]);
 
   useLayoutEffect(() => {
     const panel = panelRef.current;
@@ -90,7 +82,6 @@ export function ToolContent({ tool, sessionId, revision, search, navigationId = 
         // A response can shrink between search and retrieval; report the stale position visibly.
       }
       completeNavigation(navigationKey); setNeedsNavigation(false);
-      readyRef.current?.();
       output.saveScroll(tab, panel.scrollTop);
       restored.current = `${output.source}\u0000${tab}`;
       return;
@@ -120,7 +111,7 @@ export function ToolContent({ tool, sessionId, revision, search, navigationId = 
   const noReturn = !output.window.text && (tool.status === 'running' || tool.status === 'unknown');
   const start = output.window.text.length ? output.window.offset + 1 : 0;
   const end = outputWindowEnd(output.window);
-  return <div className={`tool-content tool-content-${mode}`}>
+  return <div className="tool-content">
     <div className="tool-call-toolbar">
       <div className="tool-call-tabs" role="tablist" aria-label="工具调用内容">{tabs.map((item, index) => <button type="button" role="tab" id={`${panelId}-tab-${item.id}`} key={item.id} aria-selected={tab === item.id} aria-controls={`${panelId}-panel`} tabIndex={tab === item.id ? 0 : -1} onKeyDown={event => moveTab(event, index)} onClick={() => selectTab(item.id)}>{item.label}</button>)}</div>
       <button type="button" className="tool-call-copy" onClick={() => void copy()} title={tab === 'arguments' ? '复制原始调用参数' : output.complete ? '复制完整原始返回' : `复制当前原始返回范围 ${start}–${end} 字符`}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? '已复制' : tab === 'arguments' ? '复制参数' : output.complete ? '复制返回' : '复制当前范围'}</button>

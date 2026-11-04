@@ -1,6 +1,7 @@
-export type ToolViewState = { open: boolean; tab: 'result' | 'arguments' | 'raw' };
+export type ToolTab = 'result' | 'arguments' | 'raw';
 type StateStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
+// Keep storage keys stable so existing reading preferences can be migrated.
 const TOOL_STATE_KEY = 'session-lens-tool-view-v1';
 const GROUP_STATE_KEY = 'session-lens-tool-group-view-v1';
 
@@ -12,96 +13,75 @@ function validKey(value: unknown): value is string {
   } catch { return false; }
 }
 
-function validState(value: unknown): value is ToolViewState {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const state = value as Record<string, unknown>;
-  return typeof state.open === 'boolean' && ['result', 'arguments', 'raw'].includes(state.tab as string)
-    && Object.keys(state).every(key => key === 'open' || key === 'tab');
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function storedEntries(storage: StateStorage | undefined, storageKey: string): [string, ToolViewState][] {
-  if (!storage) return [];
-  try {
-    const raw = storage.getItem(storageKey);
-    if (!raw) return [];
-    const value: unknown = JSON.parse(raw);
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
-    const saved = value as Record<string, unknown>;
-    if (saved.version !== 1 || !Array.isArray(saved.entries)) return [];
-    if (!saved.entries.every(item => Array.isArray(item) && item.length === 2 && validKey(item[0]) && validState(item[1]))) return [];
-    return saved.entries as [string, ToolViewState][];
-  } catch { return []; }
+function storedState(storage: StateStorage | undefined, storageKey: string) {
+  try { return object(JSON.parse(storage?.getItem(storageKey) || 'null')); } catch { return {}; }
+}
+
+function storedEntries<T>(value: unknown, parse: (value: unknown) => T | undefined): [string, T][] | null {
+  if (!Array.isArray(value)) return null;
+  const entries: [string, T][] = [];
+  for (const item of value) {
+    if (!Array.isArray(item) || item.length !== 2 || !validKey(item[0])) return null;
+    const state = parse(item[1]);
+    if (state === undefined) return null;
+    entries.push([item[0], state]);
+  }
+  return entries;
 }
 
 function safeSessionStorage(): StateStorage | undefined {
   try { return typeof window === 'undefined' ? undefined : window.sessionStorage; } catch { return undefined; }
 }
 
-/** Retain bounded manual choices across remounts and optional refreshes, without storing log content. */
-export function createToolViewStateStore(limit = 500, storage?: StateStorage, storageKey = TOOL_STATE_KEY) {
-  if (!Number.isInteger(limit) || limit < 1) throw new RangeError('Tool view state limit must be a positive integer');
-  const entries = new Map<string, ToolViewState>();
-  const listeners = new Set<() => void>();
-  let revision = 0;
+/** Persist only the selected tab; individual records no longer expand in the timeline. */
+export function createToolTabStore(limit = 500, storage?: StateStorage, storageKey = TOOL_STATE_KEY) {
+  if (!Number.isInteger(limit) || limit < 1) throw new RangeError('Tool tab limit must be a positive integer');
+  const saved = storedState(storage, storageKey);
+  const values = saved.version === 1 || saved.version === 2 ? saved.entries : [];
+  const entries = new Map(storedEntries(values, value => {
+    const tab = saved.version === 1 ? object(value).tab : value;
+    return tab === 'result' || tab === 'arguments' || tab === 'raw' ? tab : undefined;
+  }) ?? []);
   const key = (sessionId: string, toolId: string) => JSON.stringify([sessionId, toolId]);
-  for (const [id, state] of storedEntries(storage, storageKey)) {
-    entries.delete(id);
-    entries.set(id, { open: state.open, tab: state.tab });
-  }
-  function trim() {
-    while (entries.size > limit) entries.delete(entries.keys().next().value!);
-  }
+  function trim() { while (entries.size > limit) entries.delete(entries.keys().next().value!); }
   trim();
-  function save() {
-    try { storage?.setItem(storageKey, JSON.stringify({ version: 1, entries: [...entries] })); }
-    catch { /* Disabled or full browser storage must not interrupt timeline reading. */ }
-  }
   return {
-    get(sessionId: string, toolId: string): ToolViewState | undefined {
-      const id = key(sessionId, toolId);
-      const state = entries.get(id);
-      if (!state) return undefined;
-      entries.delete(id);
-      entries.set(id, state);
-      return { ...state };
+    get(sessionId: string, toolId: string): ToolTab | undefined {
+      const id = key(sessionId, toolId), tab = entries.get(id);
+      if (tab !== undefined) { entries.delete(id); entries.set(id, tab); }
+      return tab;
     },
-    set(sessionId: string, toolId: string, state: ToolViewState): void {
+    set(sessionId: string, toolId: string, tab: ToolTab): void {
       const id = key(sessionId, toolId);
-      entries.delete(id);
-      entries.set(id, { open: state.open, tab: state.tab });
-      trim();
-      save();
-      revision++;
-      for (const listener of listeners) listener();
+      entries.delete(id); entries.set(id, tab); trim();
+      try { storage?.setItem(storageKey, JSON.stringify({ version: 2, entries: [...entries] })); }
+      catch { /* Disabled or full browser storage must not interrupt reading. */ }
     },
-    subscribe(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    getSnapshot(): number { return revision; },
   };
 }
 
-interface StoredGroupState { entries: [string, ToolViewState][]; sessions: [string, boolean][] }
-
-function storedGroupState(storage: StateStorage | undefined, storageKey: string): StoredGroupState {
+function storedGroupState(storage: StateStorage | undefined, storageKey: string): { entries: [string, boolean][]; sessions: [string, boolean][] } {
+  const saved = storedState(storage, storageKey);
   const empty = { entries: [], sessions: [] };
-  if (!storage) return empty;
-  try {
-    const value: unknown = JSON.parse(storage.getItem(storageKey) || 'null');
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return empty;
-    const saved = value as Record<string, unknown>;
-    if ((saved.version !== 1 && saved.version !== 2) || !Array.isArray(saved.entries)
-      || !saved.entries.every(item => Array.isArray(item) && item.length === 2 && validKey(item[0]) && validState(item[1]))) return empty;
-    if (saved.version === 1) return { entries: saved.entries as [string, ToolViewState][], sessions: [] };
-    if (!Array.isArray(saved.sessions)
-      || !saved.sessions.every(item => Array.isArray(item) && item.length === 2 && typeof item[0] === 'string' && typeof item[1] === 'boolean')) return empty;
-    return { entries: saved.entries as [string, ToolViewState][], sessions: saved.sessions as [string, boolean][] };
-  } catch { return empty; }
+  if (saved.version !== 1 && saved.version !== 2 && saved.version !== 3) return empty;
+  const entries = storedEntries(saved.entries, value => {
+    const open = saved.version === 3 ? value : object(value).open;
+    return typeof open === 'boolean' ? open : undefined;
+  });
+  const sessions = saved.version === 1 ? [] : saved.sessions;
+  if (!entries || !Array.isArray(sessions) || !sessions.every(item => Array.isArray(item) && item.length === 2 && typeof item[0] === 'string' && typeof item[1] === 'boolean')) return empty;
+  return { entries, sessions: sessions as [string, boolean][] };
 }
 
 /** Session defaults reach unmounted groups; later manual choices override only their own group. */
 export function createToolGroupViewStateStore(limit = 200, storage?: StateStorage, storageKey = GROUP_STATE_KEY, sessionLimit = 40) {
   if (!Number.isInteger(limit) || limit < 1 || !Number.isInteger(sessionLimit) || sessionLimit < 1) throw new RangeError('Group state limits must be positive integers');
   const saved = storedGroupState(storage, storageKey);
-  const entries = new Map(saved.entries.map(([id, state]) => [id, { open: state.open, tab: state.tab }]));
+  const entries = new Map(saved.entries);
   const sessions = new Map(saved.sessions);
   const listeners = new Map<string, Set<() => void>>();
   const revisions = new Map<string, number>();
@@ -121,7 +101,7 @@ export function createToolGroupViewStateStore(limit = 200, storage?: StateStorag
   }
   trim();
   function save() {
-    try { storage?.setItem(storageKey, JSON.stringify({ version: 2, entries: [...entries], sessions: [...sessions] })); }
+    try { storage?.setItem(storageKey, JSON.stringify({ version: 3, entries: [...entries], sessions: [...sessions] })); }
     catch { /* The in-memory bulk choice still works when browser storage is unavailable. */ }
   }
   function trimRevisions() {
@@ -143,20 +123,20 @@ export function createToolGroupViewStateStore(limit = 200, storage?: StateStorag
     if (value !== undefined) { sessions.delete(sessionId); sessions.set(sessionId, value); }
   }
   return {
-    get(sessionId: string, groupId: string): ToolViewState | undefined {
+    get(sessionId: string, groupId: string): boolean | undefined {
       const id = key(sessionId, groupId);
       const state = entries.get(id);
       touchSession(sessionId);
-      if (state) {
+      if (state !== undefined) {
         entries.delete(id); entries.set(id, state);
-        return { ...state };
+        return state;
       }
       const open = sessions.get(sessionId);
-      return open === undefined ? undefined : { open, tab: 'result' };
+      return open;
     },
-    set(sessionId: string, groupId: string, state: ToolViewState): void {
+    set(sessionId: string, groupId: string, open: boolean): void {
       const id = key(sessionId, groupId);
-      entries.delete(id); entries.set(id, { open: state.open, tab: state.tab });
+      entries.delete(id); entries.set(id, open);
       touchSession(sessionId);
       const affected = new Set([sessionId]); trim(affected); save(); notify(affected);
     },
@@ -178,5 +158,5 @@ export function createToolGroupViewStateStore(limit = 200, storage?: StateStorag
   };
 }
 
-export const toolViewState = createToolViewStateStore(500, safeSessionStorage(), TOOL_STATE_KEY);
+export const toolTabState = createToolTabStore(500, safeSessionStorage(), TOOL_STATE_KEY);
 export const toolGroupViewState = createToolGroupViewStateStore(200, safeSessionStorage(), GROUP_STATE_KEY);

@@ -224,6 +224,6 @@ export function CollaborationView({ session, activity, onSelectSession, onNaviga
         </div>
       </details>
     </div>
-    <details className="collab-unlinked"><summary>未关联消息 <span>{unlinked.length} 条</span></summary><p className="collab-note">至少一端尚未匹配到已载入会话。展开全文可阅读完整消息和原始任务路径，“查看来源轮次”可定位原始记录。</p><CollaborationMessages messages={unlinked} labels={labels} revisions={revisions} onNavigate={navigate} /></details>
+    <details className="collab-unlinked"><summary>未关联消息 <span>{unlinked.length} 条</span></summary><p className="collab-note">至少一端尚未匹配到已载入会话。点击消息查看完整内容和原始任务路径，详情中的“查看来源轮次”可定位原始记录。</p><CollaborationMessages messages={unlinked} labels={labels} revisions={revisions} onNavigate={navigate} /></details>
   </section>;
 }

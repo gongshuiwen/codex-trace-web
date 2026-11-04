@@ -6,6 +6,7 @@ import { api, errorMessage, isAbort, sessionPath } from './api';
 import { Sidebar } from './Sidebar';
 import { SessionStats, type UsageMetric } from './Stats';
 import { TurnCard } from './TurnCard';
+import { RecordWorkspace } from './RecordInspector';
 import { navigateSessionLocation, readSessionLocation, type SessionLocation, type SessionView } from './session-location';
 import { sessionDisplayName, sessionTooltip, statusLabels } from './format';
 import { useReadingPosition } from './useReadingPosition';
@@ -13,7 +14,7 @@ import { READING_BOTTOM_TOLERANCE } from './reading-position';
 import { nextToolNavigationId, toolFailureTarget, toolSearchTarget, type CompactionNavigationTarget, type ToolNavigationTarget } from './tool-navigation';
 import { ToolFailureNavigator } from './ToolFailureNavigator';
 import { CompactionNavigator } from './CompactionNavigator';
-import { toolGroupViewState, toolViewState } from './tool-view-state';
+import { toolGroupViewState, toolTabState } from './tool-view-state';
 import { TurnDirectory } from './TurnDirectory';
 import './session-header.css';
 import './tool-search.css';
@@ -343,7 +344,7 @@ function SessionWorkspace({ session, reloadVersion, location, onNavigate, naviga
   function navigateToFailure(failure: ToolFailureItem) {
     reading.cancelNavigation(); searchNavigationRequested.current = true;
     setCompactionTarget(null); setAnswerTarget(null);
-    toolViewState.set(session.session.id, failure.toolId, { open: true, tab: 'result' });
+    toolTabState.set(session.session.id, failure.toolId, 'result');
     setToolTarget(toolFailureTarget(failure, nextToolNavigationId()));
     onTargetTurn(failure.turnId);
   }
@@ -357,8 +358,8 @@ function SessionWorkspace({ session, reloadVersion, location, onNavigate, naviga
     preserveToolLayout(() => { if (open) setConversationMode('full'); toolGroupViewState.setAll(session.session.id, open); });
   }
   const bulkToolActions = <>
-    <button type="button" className="tool-bulk-button" aria-label="全部展开工具调用" title="展开当前会话的全部工具调用" disabled={value.toolCount === 0} onClick={() => setAllToolsOpen(true)}><ChevronDown size={15} /><span className="tool-bulk-label">全部展开</span></button>
-    <button type="button" className="tool-bulk-button" aria-label="全部收起工具调用" title="收起当前会话的全部工具调用" disabled={value.toolCount === 0} onClick={() => setAllToolsOpen(false)}><ChevronUp size={15} /><span className="tool-bulk-label">全部收起</span></button>
+    <button type="button" className="tool-bulk-button" aria-label="展开全部工具组" title="展开当前会话的全部工具组" disabled={value.toolCount === 0} onClick={() => setAllToolsOpen(true)}><ChevronDown size={15} /><span className="tool-bulk-label">全部展开</span></button>
+    <button type="button" className="tool-bulk-button" aria-label="收起全部工具组" title="收起当前会话的全部工具组" disabled={value.toolCount === 0} onClick={() => setAllToolsOpen(false)}><ChevronUp size={15} /><span className="tool-bulk-label">全部收起</span></button>
   </>;
   const modeControl = <select className="conversation-mode-select" aria-label="对话显示模式" value={conversationMode} onChange={event => {
     changeConversationMode(event.currentTarget.value as ConversationMode);
@@ -435,11 +436,13 @@ function SessionWorkspace({ session, reloadVersion, location, onNavigate, naviga
         event.preventDefault(); navigateToMatch(activeMatchIndex + (event.key === 'ArrowUp' ? -1 : 1));
       }
     }}>
+    <RecordWorkspace scope={`${value.id}:${view}`} revision={`${value.revision}:${reloadVersion}`} preserveLayout={reading.preserveLayout} onNavigate={(_, turnId) => navigateToTurn(turnId)}>
     {(overviewOpened || view !== 'conversation') && <Suspense fallback={view !== 'conversation' ? <div className="turn-loading">正在打开会话视图…</div> : null}><SessionOverview session={session} location={location} onNavigate={onNavigate} onSelectSession={onSelectSession} onNavigateTurn={navigateToTurn} /></Suspense>}
     <div className="timeline-viewport absolute inset-0 min-h-0" aria-hidden={view !== 'conversation'} style={view === 'conversation' ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}>
       {session.turns.length === 0 ? <div className="timeline-empty flex h-full min-h-40 flex-col items-center justify-center gap-3 text-sm text-[var(--muted)]"><Layers3 size={24} /><p>会话已载入，还没有可展示的轮次。</p></div> : <Virtuoso ref={virtuoso} className="turn-virtuoso h-full [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent]" data={session.turns} computeItemKey={(_, turn) => turn.id} scrollerRef={reading.scrollerRef} totalListHeightChanged={reading.onLayoutChanged} rangeChanged={reading.onLayoutChanged} increaseViewportBy={600} followOutput={reading.followOutput} atBottomThreshold={READING_BOTTOM_TOLERANCE} atBottomStateChange={value => { atBottom.current = value; if (value) setNewContent(false); }} itemContent={(_, turn) => <TurnCard turn={turn} sessionId={value.id} session={session} revision={`${value.revision}:${reloadVersion}`} targetTurn={targetTurn} toolTarget={toolTarget} compactionTarget={compactionTarget} readingMode={conversationMode === 'reading'} onNavigateFinalAnswer={eventId => navigateToAnswer(turn.id, eventId)} preserveLayout={preserveToolLayout} onSearchReady={searchReady} onUsage={turnId => onNavigate({ ...location, view: 'usage', usageTurn: turnId, request: null, focus: 'calls' })} onReady={reading.onTurnReady} />} />}
       {newContent && <button className="new-content-button absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-[var(--primary)] px-4 py-2.5 text-xs text-[var(--on-primary)] shadow-lg" onClick={() => { reading.cancelNavigation(); virtuoso.current?.scrollToIndex({ index: session.turns.length - 1, align: 'end', behavior: 'smooth' }); setNewContent(false); }}><ArrowDown size={14} />有新内容，跳到最新</button>}
     </div>
+    </RecordWorkspace>
     </div>
     {showTurnDirectory && <TurnDirectory turns={session.turns} activeTurnId={reading.currentTurnId ?? session.turns[0]?.id ?? null} onSelect={navigateToTurn} onClose={() => setShowTurnDirectory(false)} />}
   </div>;

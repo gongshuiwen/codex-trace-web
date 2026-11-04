@@ -90,7 +90,7 @@ describe('lightweight session activity', () => {
   });
 
   it('serves activity in the existing worker without copying tool bodies or accepting local file paths', async () => {
-    const { file, root, sessionsDir, dataDir } = await fixture([meta(), start(), message('user', 'small prompt'),
+    const { file, sessionsDir, dataDir } = await fixture([meta(), start(), message('user', 'small prompt'),
       row('response_item', { type: 'function_call', call_id: 'large', name: 'exec', arguments: 'not activity content' }),
       row('response_item', { type: 'function_call_output', call_id: 'large', output: 'PRIVATE_TOOL_BODY'.repeat(60000) }),
       record('r1'), agent(protocol('brief update')), row('compacted', {}), end()]);

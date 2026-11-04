@@ -50,10 +50,8 @@
   .primary-button:disabled { @apply border-[var(--border)] bg-[var(--hover)] text-[var(--muted)] brightness-100; }
   .secondary-button:disabled { opacity:.55; }
   .status-label { @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-[var(--muted)]; }
-  .status-label.running,.status-label.completed,.tool-status.completed { color:var(--accent-strong); }
+  .status-label.running,.status-label.completed { color:var(--accent-strong); }
   .status-label.interrupted { color:var(--warning); }
-  .tool-status { @apply ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-sans text-xs text-[var(--muted)]; }
-  .tool-status.failed { color:var(--danger); }
   .dot,.pulse { @apply inline-block size-1.5 shrink-0 rounded-full bg-[var(--accent)]; }
   .muted-dot { background:var(--muted); }
   .danger-dot { background:var(--danger); }

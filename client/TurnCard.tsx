@@ -13,7 +13,7 @@ import { UserPrompt } from './UserPrompt';
 import type { CompactionNavigationTarget, ToolNavigationTarget } from './tool-navigation';
 import { eventViewState } from './event-view-state';
 import { groupAdjacentContexts } from './event-presentation';
-import { ContextEvents, EventDisclosure, FinalAnswer } from './TimelineEvents';
+import { ContextEvents, EventRecord, FinalAnswer } from './TimelineEvents';
 import { buildTimelineCollaboration } from './collaboration-participants';
 import { groupReadingProcess, latestReadingCommentary, readingProcessHasTool, readingProcessStateKey, readingProcessSummary, readingProcessToolStates, type ReadingProcessGroup, type ReadingTimelineEntry } from './reading-mode';
 import './reading-mode.css';
@@ -95,9 +95,9 @@ export function TurnCard({ turn, sessionId, session, revision, onUsage, targetTu
   }
   const collaboration = useMemo(() => session && detail ? buildTimelineCollaboration(detail.events, session, turn.id) : undefined, [detail?.events, session, turn.id]);
   function renderEvent(event: TimelineEvent) {
-    if (event.kind === 'collaboration' && event.collaboration) return <CollaborationCard key={event.id} event={event} sessionId={sessionId} record={collaboration?.records.get(event.id)} labels={collaboration?.labels} preserveLayout={preserveLayout} />;
+    if (event.kind === 'collaboration' && event.collaboration) return <CollaborationCard key={event.id} event={event} sessionId={sessionId} turnId={turn.id} revision={revision} record={collaboration?.records.get(event.id)} labels={collaboration?.labels} />;
     if (event.kind === 'user') return <div key={event.id}><span className="event-phase mb-1 block text-xs text-[var(--muted)]">补充消息 · {clock(event.timestamp)}</span><UserPrompt text={event.text} sessionId={sessionId} stateKey={`prompt:${turn.id}:${event.id}`} preserveLayout={preserveLayout} /></div>;
-    if (event.kind === 'reasoning' || event.kind === 'unknown') return <EventDisclosure key={event.id} sessionId={sessionId} event={event} preserveLayout={preserveLayout} />;
+    if (event.kind === 'reasoning' || event.kind === 'unknown') return <EventRecord key={event.id} sessionId={sessionId} event={event} />;
     if (event.kind === 'notice' && event.noticeType === 'compaction') return <div className="timeline-notice compaction-record" key={event.id} data-compaction-event-id={event.id}><Minimize2 size={14} /><span>{event.text}</span><time dateTime={event.timestamp}>{clock(event.timestamp)}</time></div>;
     if (event.kind === 'notice') return <div className="timeline-notice" key={event.id}><AlertTriangle size={14} /><span>{event.text}</span></div>;
     if (event.kind === 'assistant') return <FinalAnswer key={event.id} event={event} />;

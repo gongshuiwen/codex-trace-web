@@ -85,7 +85,7 @@ function publish(entry: Entry, snapshot: Snapshot) {
   for (const listener of entry.listeners) listener();
 }
 
-/** A bounded shared text window lets inline cards and the reader use the same pages. */
+/** Retain bounded output windows when switching records in the inspector. */
 export function useToolOutput({ tool, sessionId, revision, search }: { tool: ToolCall; sessionId: string; revision: string; search?: ToolSearchLocation }) {
   const source = toolOutputSource(sessionId, revision, tool);
   const toolKey = JSON.stringify([sessionId, tool.id]);

@@ -1,7 +1,7 @@
 import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderRecords } from './render-records';
 import { describe, expect, it } from 'vitest';
-import { ContextEvents, EventDisclosure } from '../client/TimelineEvents';
+import { ContextEvents } from '../client/TimelineEvents';
 import { createEventViewStateStore, eventViewState } from '../client/event-view-state';
 
 function fakeStorage() {
@@ -16,11 +16,11 @@ function fakeStorage() {
 describe('event disclosure choices', () => {
   it('isolates manual open and closed choices by session and event identity', () => {
     const store = createEventViewStateStore();
-    store.set('first-session', 'disclosure:same-event', true);
-    store.set('second-session', 'disclosure:same-event', false);
+    store.set('first-session', 'reading-process:same-event', true);
+    store.set('second-session', 'reading-process:same-event', false);
     store.set('first-session', 'context-group:same-event', false);
-    expect(store.get('first-session', 'disclosure:same-event')).toBe(true);
-    expect(store.get('second-session', 'disclosure:same-event')).toBe(false);
+    expect(store.get('first-session', 'reading-process:same-event')).toBe(true);
+    expect(store.get('second-session', 'reading-process:same-event')).toBe(false);
     expect(store.get('first-session', 'context-group:same-event')).toBe(false);
     expect(store.get('first-session', 'missing')).toBeUndefined();
   });
@@ -80,27 +80,16 @@ describe('event disclosure choices', () => {
     expect(store.get('session', 'event')).toBe(true);
   });
 
-  it('restores nested context source choices independently from their group', () => {
-    const event = { id: 'nested-source', kind: 'context' as const, text: 'Original context body', timestamp: '2026-11-03T00:00:00Z' };
-    const props = { sessionId: 'nested-rendering', group: { kind: 'context-group' as const, id: event.id, events: [event] } };
-    eventViewState.set(props.sessionId, `context-group:${event.id}`, true);
-    eventViewState.set(props.sessionId, `context-source:${event.id}`, true);
-    const expanded = renderToStaticMarkup(createElement(ContextEvents, props));
-    expect(expanded.match(/aria-expanded="true"/g)).toHaveLength(2);
-    expect(expanded).toContain('Original context body');
+  it('restores context group choices while keeping individual records as detail actions', () => {
+    const event = { id: 'source', kind: 'context' as const, text: 'Context preview\nSECRET_CONTEXT_BODY', timestamp: '2026-11-03T00:00:00Z' };
+    const props = { sessionId: 'context-rendering', group: { kind: 'context-group' as const, id: event.id, events: [event] } };
     eventViewState.set(props.sessionId, `context-group:${event.id}`, false);
-    expect(renderToStaticMarkup(createElement(ContextEvents, props))).not.toContain('<pre');
+    expect(renderRecords(createElement(ContextEvents, props))).not.toContain('data-context-event-id=');
     eventViewState.set(props.sessionId, `context-group:${event.id}`, true);
-    expect(renderToStaticMarkup(createElement(ContextEvents, props)).match(/aria-expanded="true"/g)).toHaveLength(2);
-  });
-
-  it('restores a reasoning disclosure after remount without affecting another session', () => {
-    const event = { id: 'reasoning-record', kind: 'reasoning' as const, text: 'Stored reasoning body', timestamp: '2026-11-03T00:00:00Z' };
-    eventViewState.set('reasoning-rendering', `disclosure:${event.id}`, true);
-    const expanded = renderToStaticMarkup(createElement(EventDisclosure, { sessionId: 'reasoning-rendering', event }));
-    const untouched = renderToStaticMarkup(createElement(EventDisclosure, { sessionId: 'different-session', event }));
-    expect(expanded).toContain('aria-expanded="true"');
-    expect(expanded).toContain('event-disclosure-body');
-    expect(untouched).toContain('aria-expanded="false"');
+    const expanded = renderRecords(createElement(ContextEvents, props));
+    expect(expanded.match(/aria-expanded="true"/g)).toHaveLength(1);
+    expect(expanded).toContain('data-context-event-id="source"');
+    expect(expanded).not.toContain('<pre');
+    expect(expanded).not.toContain('record-details-content');
   });
 });

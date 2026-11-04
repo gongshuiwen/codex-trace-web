@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createToolGroupViewStateStore, createToolViewStateStore, type ToolViewState } from '../client/tool-view-state';
+import { createToolGroupViewStateStore, createToolTabStore } from '../client/tool-view-state';
 
 function fakeStorage() {
   const values = new Map<string, string>();
@@ -11,282 +11,171 @@ function fakeStorage() {
     setItem(key: string, value: string) { writes++; values.set(key, value); },
   };
 }
+const key = (session: string, record: string) => JSON.stringify([session, record]);
 
-describe('manual tool view state', () => {
-  it('keeps choices isolated by both session and stable tool identity', () => {
-    const store = createToolViewStateStore();
-    store.set('session-a', 'tool-1', { open: true, tab: 'arguments' });
-    store.set('session-b', 'tool-1', { open: false, tab: 'raw' });
-    store.set('session-a', 'tool-2', { open: true, tab: 'result' });
-    expect(store.get('session-a', 'tool-1')).toEqual({ open: true, tab: 'arguments' });
-    expect(store.get('session-b', 'tool-1')).toEqual({ open: false, tab: 'raw' });
-    expect(store.get('session-a', 'tool-2')).toEqual({ open: true, tab: 'result' });
-    expect(store.get('session-b', 'tool-2')).toBeUndefined();
+describe('tool tab preferences', () => {
+  it('isolates tabs by session and tool, including identities containing separators', () => {
+    const store = createToolTabStore();
+    store.set('first', 'same', 'arguments'); store.set('second', 'same', 'raw');
+    store.set('a:b', 'c', 'result'); store.set('a', 'b:c', 'raw');
+    expect(store.get('first', 'same')).toBe('arguments');
+    expect(store.get('second', 'same')).toBe('raw');
+    expect(store.get('a:b', 'c')).toBe('result');
+    expect(store.get('a', 'b:c')).toBe('raw');
+    expect(store.get('missing', 'same')).toBeUndefined();
   });
 
-  it('replaces a manual choice without consuming another cache entry', () => {
-    const store = createToolViewStateStore(2);
-    store.set('session', 'tool-1', { open: true, tab: 'result' });
-    store.set('session', 'tool-2', { open: false, tab: 'raw' });
-    store.set('session', 'tool-1', { open: false, tab: 'arguments' });
-    expect(store.get('session', 'tool-1')).toEqual({ open: false, tab: 'arguments' });
-    expect(store.get('session', 'tool-2')).toEqual({ open: false, tab: 'raw' });
+  it('bounds persisted tabs by recent use without writing on reads', () => {
+    const storage = fakeStorage(), store = createToolTabStore(2, storage, 'tabs');
+    store.set('session', 'one', 'raw'); store.set('session', 'two', 'result');
+    const writes = storage.writes;
+    store.get('session', 'one');
+    expect(storage.writes).toBe(writes);
+    store.set('session', 'three', 'arguments');
+    const restored = createToolTabStore(2, storage, 'tabs');
+    expect(restored.get('session', 'two')).toBeUndefined();
+    expect(restored.get('session', 'one')).toBe('raw');
+    expect(restored.get('session', 'three')).toBe('arguments');
+    expect(createToolTabStore(1, storage, 'tabs').get('session', 'one')).toBeUndefined();
   });
 
-  it('evicts the least recently used choice when the bound is reached', () => {
-    const store = createToolViewStateStore(2);
-    store.set('session', 'tool-1', { open: true, tab: 'result' });
-    store.set('session', 'tool-2', { open: false, tab: 'raw' });
-    store.get('session', 'tool-1');
-    store.set('session', 'tool-3', { open: true, tab: 'arguments' });
-    expect(store.get('session', 'tool-2')).toBeUndefined();
-    expect(store.get('session', 'tool-1')).toEqual({ open: true, tab: 'result' });
-    expect(store.get('session', 'tool-3')).toEqual({ open: true, tab: 'arguments' });
-  });
-
-  it('returns snapshots and does not retain caller-owned mutable state', () => {
-    const store = createToolViewStateStore();
-    const choice: ToolViewState = { open: false, tab: 'raw' };
-    store.set('session', 'tool', choice);
-    choice.open = true;
-    const snapshot = store.get('session', 'tool')!;
-    snapshot.tab = 'result';
-    expect(store.get('session', 'tool')).toEqual({ open: false, tab: 'raw' });
-  });
-
-  it('restores open and tab choices from the same storage after rebuilding the store', () => {
+  it('retains legacy tab choices while dropping obsolete expansion state and log data', () => {
     const storage = fakeStorage();
-    const first = createToolViewStateStore(500, storage, 'tools');
-    first.set('session-a', 'tool-1', { open: true, tab: 'arguments' });
-    first.set('session-b', 'tool-1', { open: false, tab: 'raw' });
-    const restored = createToolViewStateStore(500, storage, 'tools');
-    expect(restored.get('session-a', 'tool-1')).toEqual({ open: true, tab: 'arguments' });
-    expect(restored.get('session-b', 'tool-1')).toEqual({ open: false, tab: 'raw' });
-    const snapshot = restored.get('session-a', 'tool-1')!;
-    snapshot.open = false;
-    expect(restored.get('session-a', 'tool-1')!.open).toBe(true);
-  });
-
-  it('keeps group state separate from tool state in shared browser storage', () => {
-    const storage = fakeStorage();
-    const tools = createToolViewStateStore(500, storage, 'tools');
-    const groups = createToolViewStateStore(200, storage, 'groups');
-    tools.set('session', 'same-id', { open: true, tab: 'raw' });
-    groups.set('session', 'same-id', { open: false, tab: 'result' });
-    expect(createToolViewStateStore(500, storage, 'tools').get('session', 'same-id')).toEqual({ open: true, tab: 'raw' });
-    expect(createToolViewStateStore(200, storage, 'groups').get('session', 'same-id')).toEqual({ open: false, tab: 'result' });
-  });
-
-  it('persists the bounded LRU on set without writing on read', () => {
-    const storage = fakeStorage();
-    const store = createToolViewStateStore(2, storage, 'tools');
-    store.set('session', 'tool-1', { open: true, tab: 'result' });
-    store.set('session', 'tool-2', { open: false, tab: 'raw' });
-    const writesBeforeRead = storage.writes;
-    store.get('session', 'tool-1');
-    store.get('session', 'missing');
-    expect(storage.writes).toBe(writesBeforeRead);
-    store.set('session', 'tool-3', { open: true, tab: 'arguments' });
-    const restored = createToolViewStateStore(2, storage, 'tools');
-    expect(restored.get('session', 'tool-1')).toEqual({ open: true, tab: 'result' });
-    expect(restored.get('session', 'tool-2')).toBeUndefined();
-    expect(restored.get('session', 'tool-3')).toEqual({ open: true, tab: 'arguments' });
-    expect(JSON.parse(storage.values.get('tools')!).entries).toHaveLength(2);
-  });
-
-  it('enforces a lower bound when restoring previously saved entries', () => {
-    const storage = fakeStorage();
-    const first = createToolViewStateStore(4, storage, 'tools');
-    for (const toolId of ['oldest', 'middle', 'newest']) first.set('session', toolId, { open: true, tab: 'result' });
-    const restored = createToolViewStateStore(2, storage, 'tools');
-    expect(restored.get('session', 'oldest')).toBeUndefined();
-    expect(restored.get('session', 'middle')).toBeDefined();
-    expect(restored.get('session', 'newest')).toBeDefined();
+    storage.values.set('tabs', JSON.stringify({ version: 1, entries: [
+      [key('session', 'tool'), { open: true, tab: 'arguments', output: 'private content' }],
+    ] }));
+    const store = createToolTabStore(2, storage, 'tabs');
+    expect(store.get('session', 'tool')).toBe('arguments');
+    store.set('session', 'other', 'raw');
+    expect(JSON.parse(storage.values.get('tabs')!)).toEqual({ version: 2, entries: [
+      [key('session', 'tool'), 'arguments'], [key('session', 'other'), 'raw'],
+    ] });
+    expect(storage.values.get('tabs')).not.toContain('open');
+    expect(storage.values.get('tabs')).not.toContain('private content');
   });
 
   it.each([
     'not JSON',
-    '[]',
-    'null',
-    '{"version":2,"entries":[]}',
-    '{"version":1,"entries":{}}',
-    '{"version":1,"entries":[[42,{"open":true,"tab":"result"}]]}',
-    '{"version":1,"entries":[["not a composite key",{"open":true,"tab":"result"}]]}',
-    '{"version":1,"entries":[["[1,2]",{"open":true,"tab":"result"}]]}',
-    '{"version":1,"entries":[["[\\"session\\",\\"tool\\"]",{"open":"true","tab":"result"}]]}',
-    '{"version":1,"entries":[["[\\"session\\",\\"tool\\"]",{"open":true,"tab":"unknown"}]]}',
-    '{"version":1,"entries":[["[\\"session\\",\\"tool\\"]",{"open":true,"tab":"raw","output":"do not load log content"}]]}',
-  ])('ignores damaged or unsupported stored state and continues in memory: %s', saved => {
-    const storage = fakeStorage();
-    storage.values.set('tools', saved);
-    const store = createToolViewStateStore(2, storage, 'tools');
+    JSON.stringify({ version: 3, entries: [] }),
+    JSON.stringify({ version: 2, entries: [['not a composite key', 'raw']] }),
+    JSON.stringify({ version: 2, entries: [[key('session', 'tool'), 'unknown']] }),
+  ])('ignores damaged or unsupported tab storage: %s', saved => {
+    const storage = fakeStorage(); storage.values.set('tabs', saved);
+    const store = createToolTabStore(2, storage, 'tabs');
     expect(store.get('session', 'tool')).toBeUndefined();
-    store.set('session', 'tool', { open: true, tab: 'arguments' });
-    expect(store.get('session', 'tool')).toEqual({ open: true, tab: 'arguments' });
-    expect(createToolViewStateStore(2, storage, 'tools').get('session', 'tool')).toEqual({ open: true, tab: 'arguments' });
+    store.set('session', 'tool', 'raw');
+    expect(createToolTabStore(2, storage, 'tabs').get('session', 'tool')).toBe('raw');
   });
 
-  it('keeps an in-memory store working when browser storage throws', () => {
-    const storage = {
-      getItem() { throw new Error('storage unavailable'); },
-      setItem() { throw new Error('storage quota exceeded'); },
-    };
-    const store = createToolViewStateStore(2, storage, 'tools');
-    expect(() => store.set('session', 'tool', { open: true, tab: 'raw' })).not.toThrow();
-    expect(store.get('session', 'tool')).toEqual({ open: true, tab: 'raw' });
-  });
-
-  it('serializes only identity, open and tab rather than caller-owned log data', () => {
-    const storage = fakeStorage();
-    const store = createToolViewStateStore(2, storage, 'tools');
-    store.set('session', 'tool', { open: true, tab: 'result', output: 'private tool output', arguments: 'private input' } as ToolViewState);
-    const saved = storage.values.get('tools')!;
-    expect(saved).not.toContain('private');
-    expect(JSON.parse(saved)).toEqual({ version: 1, entries: [[JSON.stringify(['session', 'tool']), { open: true, tab: 'result' }]] });
+  it('keeps tabs usable when browser storage is unavailable', () => {
+    const store = createToolTabStore(2, {
+      getItem() { throw new Error('denied'); }, setItem() { throw new Error('full'); },
+    });
+    expect(() => store.set('session', 'tool', 'arguments')).not.toThrow();
+    expect(store.get('session', 'tool')).toBe('arguments');
   });
 });
 
-describe('session-wide tool group view state', () => {
-  it('applies bulk choices to old overrides and groups that have not mounted', () => {
+describe('tool group expansion preferences', () => {
+  it('applies bulk defaults to unseen groups and replaces later manual overrides', () => {
     const store = createToolGroupViewStateStore();
-    store.set('session', 'one', { open: true, tab: 'result' });
-    store.set('session', 'two', { open: false, tab: 'result' });
-    store.setAll('session', false);
-    for (const id of ['one', 'two', 'not-mounted-yet']) expect(store.get('session', id)?.open).toBe(false);
+    store.set('session', 'manual', true); store.setAll('session', false);
+    expect(store.get('session', 'manual')).toBe(false);
+    expect(store.get('session', 'unmounted')).toBe(false);
+    store.set('session', 'manual', true);
+    expect(store.get('session', 'manual')).toBe(true);
+    expect(store.get('session', 'unmounted')).toBe(false);
     store.setAll('session', true);
-    for (const id of ['one', 'two', 'not-mounted-yet']) expect(store.get('session', id)?.open).toBe(true);
+    expect(store.get('session', 'manual')).toBe(true);
+    expect(store.get('session', 'unmounted')).toBe(true);
   });
 
-  it('allows a later manual choice and replaces it on the next bulk action', () => {
-    const store = createToolGroupViewStateStore();
-    store.setAll('session', true);
-    store.set('session', 'manual', { open: false, tab: 'result' });
-    expect(store.get('session', 'manual')?.open).toBe(false);
-    expect(store.get('session', 'other')?.open).toBe(true);
-    store.setAll('session', true);
-    expect(store.get('session', 'manual')?.open).toBe(true);
+  it('isolates sessions and persists group choices separately from tool tabs', () => {
+    const storage = fakeStorage(), groups = createToolGroupViewStateStore(2, storage, 'groups');
+    const tabs = createToolTabStore(2, storage, 'tabs');
+    tabs.set('first', 'same', 'raw');
+    groups.setAll('first', true); groups.set('first', 'same', false); groups.setAll('second', false);
+    const restored = createToolGroupViewStateStore(2, storage, 'groups');
+    expect(restored.get('first', 'same')).toBe(false);
+    expect(restored.get('first', 'unseen')).toBe(true);
+    expect(restored.get('second', 'same')).toBe(false);
+    expect(restored.get('missing', 'same')).toBeUndefined();
+    expect(tabs.get('first', 'same')).toBe('raw');
   });
 
-  it('isolates sessions and leaves individual tool tabs unchanged', () => {
+  it.each([1, 2])('migrates version %s group choices without retaining obsolete tabs', version => {
     const storage = fakeStorage();
-    const groups = createToolGroupViewStateStore(200, storage, 'groups');
-    const tools = createToolViewStateStore(500, storage, 'tools');
-    tools.set('session-a', 'same-id', { open: true, tab: 'raw' });
-    groups.set('session-b', 'same-id', { open: true, tab: 'result' });
-    groups.setAll('session-a', false);
-    expect(groups.get('session-b', 'same-id')?.open).toBe(true);
-    expect(groups.get('unrelated', 'same-id')).toBeUndefined();
-    expect(tools.get('session-a', 'same-id')).toEqual({ open: true, tab: 'raw' });
+    storage.values.set('groups', JSON.stringify({ version, entries: [
+      [key('session', 'manual'), { open: false, tab: 'raw', output: 'private content' }],
+    ], ...(version === 2 ? { sessions: [['session', true]] } : {}) }));
+    const store = createToolGroupViewStateStore(2, storage, 'groups');
+    expect(store.get('session', 'manual')).toBe(false);
+    expect(store.get('session', 'unseen')).toBe(version === 2 ? true : undefined);
+    store.set('session', 'other', true);
+    expect(JSON.parse(storage.values.get('groups')!)).toEqual({ version: 3, entries: [
+      [key('session', 'manual'), false], [key('session', 'other'), true],
+    ], sessions: version === 2 ? [['session', true]] : [] });
+    expect(storage.values.get('groups')).not.toContain('tab');
+    expect(storage.values.get('groups')).not.toContain('private content');
   });
 
-  it('restores bulk defaults and subsequent manual overrides from storage', () => {
-    const storage = fakeStorage();
-    const first = createToolGroupViewStateStore(200, storage, 'groups');
-    first.setAll('session-a', true);
-    first.setAll('session-b', false);
-    first.set('session-a', 'manual', { open: false, tab: 'result' });
-    const restored = createToolGroupViewStateStore(200, storage, 'groups');
-    expect(restored.get('session-a', 'unseen')?.open).toBe(true);
-    expect(restored.get('session-a', 'manual')?.open).toBe(false);
-    expect(restored.get('session-b', 'unseen')?.open).toBe(false);
-    const snapshot = restored.get('session-a', 'manual')!;
-    snapshot.open = true;
-    expect(restored.get('session-a', 'manual')?.open).toBe(false);
-  });
-
-  it('migrates earlier per-group state without inventing a bulk default', () => {
-    const storage = fakeStorage();
-    createToolViewStateStore(200, storage, 'groups').set('session', 'legacy', { open: true, tab: 'result' });
-    const restored = createToolGroupViewStateStore(200, storage, 'groups');
-    expect(restored.get('session', 'legacy')?.open).toBe(true);
-    expect(restored.get('session', 'unseen')).toBeUndefined();
-    restored.setAll('session', false);
-    expect(JSON.parse(storage.values.get('groups')!).version).toBe(2);
-    expect(createToolGroupViewStateStore(200, storage, 'groups').get('session', 'legacy')?.open).toBe(false);
-  });
-
-  it('notifies only affected session subscribers with stable numeric snapshots', () => {
-    const store = createToolGroupViewStateStore();
-    const first = vi.fn(), second = vi.fn();
-    const unsubscribe = store.subscribe('session-a', first);
-    store.subscribe('session-b', second);
-    expect(store.getSnapshot('session-a')).toBe(0);
-    store.setAll('session-a', false);
-    const snapshot = store.getSnapshot('session-a');
-    expect(snapshot).toBeGreaterThan(0);
-    store.get('session-a', 'unseen');
-    expect(store.getSnapshot('session-a')).toBe(snapshot);
-    expect(first).toHaveBeenCalledTimes(1);
-    expect(second).not.toHaveBeenCalled();
-    store.set('session-a', 'manual', { open: true, tab: 'result' });
-    expect(store.getSnapshot('session-a')).toBeGreaterThan(snapshot);
+  it('notifies affected sessions, keeps read snapshots stable and unsubscribes correctly', () => {
+    const store = createToolGroupViewStateStore(), first = vi.fn(), second = vi.fn();
+    const unsubscribe = store.subscribe('first', first); store.subscribe('second', second);
+    store.setAll('first', false);
+    const snapshot = store.getSnapshot('first');
+    store.get('first', 'unseen');
+    expect(store.getSnapshot('first')).toBe(snapshot);
+    expect(first).toHaveBeenCalledOnce(); expect(second).not.toHaveBeenCalled();
+    store.set('first', 'manual', true);
+    expect(store.getSnapshot('first')).toBeGreaterThan(snapshot);
     expect(first).toHaveBeenCalledTimes(2);
-    unsubscribe();
-    store.setAll('session-a', true);
+    unsubscribe(); store.setAll('first', true);
     expect(first).toHaveBeenCalledTimes(2);
-    expect(second).not.toHaveBeenCalled();
   });
 
-  it('bounds saved defaults and manual choices with independent LRU limits', () => {
-    const storage = fakeStorage();
-    const store = createToolGroupViewStateStore(2, storage, 'groups', 2);
-    store.setAll('oldest', true);
-    store.setAll('recent', true);
-    store.get('oldest', 'unseen');
-    store.setAll('newest', false);
+  it('bounds defaults and manual overrides independently and restores to smaller limits', () => {
+    const storage = fakeStorage(), store = createToolGroupViewStateStore(2, storage, 'groups', 2);
+    store.setAll('oldest', true); store.setAll('recent', true); store.get('oldest', 'unseen'); store.setAll('newest', false);
     expect(store.get('recent', 'unseen')).toBeUndefined();
-    expect(store.get('oldest', 'unseen')?.open).toBe(true);
-    store.set('oldest', 'one', { open: false, tab: 'result' });
-    store.set('oldest', 'two', { open: false, tab: 'result' });
-    store.get('oldest', 'one');
-    store.set('oldest', 'three', { open: false, tab: 'result' });
-    expect(store.get('oldest', 'two')?.open).toBe(true);
-    expect(store.get('oldest', 'one')?.open).toBe(false);
-    const saved = JSON.parse(storage.values.get('groups')!);
-    expect(saved.entries).toHaveLength(2);
-    expect(saved.sessions).toHaveLength(2);
+    store.set('oldest', 'one', false); store.set('oldest', 'two', false); store.get('oldest', 'one'); store.set('oldest', 'three', false);
+    expect(store.get('oldest', 'two')).toBe(true);
+    expect(store.get('oldest', 'one')).toBe(false);
     const restored = createToolGroupViewStateStore(1, storage, 'groups', 1);
     expect(restored.get('newest', 'unseen')).toBeUndefined();
-    expect(restored.get('oldest', 'three')?.open).toBe(false);
+    expect(restored.get('oldest', 'three')).toBe(false);
   });
 
-  it('notifies another subscribed session when bounded eviction changes its choice', () => {
-    const store = createToolGroupViewStateStore(1, undefined, 'groups', 1);
-    const old = vi.fn();
-    store.setAll('old', true);
-    store.subscribe('old', old);
+  it('notifies a subscribed session when bounded eviction changes its default', () => {
+    const store = createToolGroupViewStateStore(1, undefined, 'groups', 1), listener = vi.fn();
+    store.setAll('old', true); store.subscribe('old', listener);
     const snapshot = store.getSnapshot('old');
     store.setAll('new', true);
     expect(store.get('old', 'unseen')).toBeUndefined();
     expect(store.getSnapshot('old')).toBeGreaterThan(snapshot);
-    expect(old).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledOnce();
   });
 
   it.each([
     'not JSON',
-    '{"version":3,"entries":[],"sessions":[]}',
-    '{"version":2,"entries":[],"sessions":[["session","true"]]}',
-    '{"version":2,"entries":[["not a composite key",{"open":true,"tab":"result"}]],"sessions":[]}',
-    '{"version":2,"entries":[],"sessions":{}}',
-  ])('ignores damaged bulk state and continues with new actions: %s', saved => {
+    JSON.stringify({ version: 4, entries: [], sessions: [] }),
+    JSON.stringify({ version: 3, entries: [[key('session', 'group'), 'true']], sessions: [] }),
+    JSON.stringify({ version: 3, entries: [], sessions: [['session', 'true']] }),
+  ])('ignores damaged group preferences: %s', saved => {
     const storage = fakeStorage(); storage.values.set('groups', saved);
-    const store = createToolGroupViewStateStore(200, storage, 'groups');
+    const store = createToolGroupViewStateStore(2, storage, 'groups');
     expect(store.get('session', 'group')).toBeUndefined();
-    store.setAll('session', true);
-    expect(store.get('session', 'group')?.open).toBe(true);
+    store.setAll('session', false);
+    expect(store.get('session', 'group')).toBe(false);
   });
 
-  it('keeps working when browser storage throws and never serializes log content', () => {
+  it('keeps bulk actions and manual choices usable without browser storage', () => {
     const store = createToolGroupViewStateStore(2, {
-      getItem() { throw new Error('storage unavailable'); },
-      setItem() { throw new Error('storage quota exceeded'); },
+      getItem() { throw new Error('denied'); }, setItem() { throw new Error('full'); },
     });
     expect(() => store.setAll('session', true)).not.toThrow();
-    expect(store.get('session', 'unseen')?.open).toBe(true);
-    const storage = fakeStorage();
-    const persisted = createToolGroupViewStateStore(2, storage, 'groups');
-    persisted.set('session', 'group', { open: true, tab: 'result', output: 'private content' } as ToolViewState);
-    expect(storage.values.get('groups')).not.toContain('private content');
-    expect(JSON.parse(storage.values.get('groups')!)).toEqual({ version: 2, entries: [[JSON.stringify(['session', 'group']), { open: true, tab: 'result' }]], sessions: [] });
+    store.set('session', 'manual', false);
+    expect(store.get('session', 'manual')).toBe(false);
+    expect(store.get('session', 'unseen')).toBe(true);
   });
 });

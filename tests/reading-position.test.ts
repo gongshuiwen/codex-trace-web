@@ -470,7 +470,7 @@ describe('bounded turn navigation', () => {
   });
 
   it('stops immediately on user interaction, including opening normal content', () => {
-    const { scroller, surface, target, scrollToTurn } = scrollingSurface();
+    const { scroller, surface, target } = scrollingSurface();
     const stopped = vi.fn();
     const navigation = locateReadingPosition(scroller, { turnId: 'target', offset: 0 }, () => {}, stopped);
     browser.dispatchEvent(new Event('pointerdown'));

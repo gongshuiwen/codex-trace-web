@@ -1,5 +1,5 @@
+import { renderRecords } from './render-records';
 import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { TimelineEvent, ToolCall, TurnSummary } from '../shared/types';
 import { groupAdjacentContexts } from '../client/event-presentation';
@@ -55,7 +55,7 @@ describe('reading mode turn rendering', () => {
   function render(sessionId: string, events: TimelineEvent[], options: { readingMode?: boolean; status?: TurnSummary['status']; target?: { toolId: string; kind: 'search' | 'failure' } } = {}) {
     const turn: TurnSummary = { id: 'turn', index: 0, prompt: 'USER_REQUEST', preview: '', startedAt: '2026-11-04T00:00:00Z', status: options.status ?? 'completed', model: 'test', toolCount: events.filter(entry => entry.kind === 'tool').length, usage, startOffset: 0, endOffset: 1 };
     turnDetailCache.put(sessionId, turn.id, 'revision', { summary: turn, events: [event('request', 'user', 'USER_REQUEST'), ...events], requests: [], warnings: [] });
-    return renderToStaticMarkup(createElement(TurnCard, { turn, sessionId, revision: 'revision', onUsage() {}, targetTurn: null, readingMode: options.readingMode, onNavigateFinalAnswer() {},
+    return renderRecords(createElement(TurnCard, { turn, sessionId, revision: 'revision', onUsage() {}, targetTurn: null, readingMode: options.readingMode, onNavigateFinalAnswer() {},
       toolTarget: options.target && { turnId: turn.id, eventId: `event-${options.target.toolId}`, toolId: options.target.toolId, kind: options.target.kind, version: 1, reveal: true },
     }));
   }
@@ -106,25 +106,24 @@ describe('reading mode turn rendering', () => {
     expect(html).toContain('reading-process-failed">1 失败');
     expect(html).toContain('reading-process-running">1 运行中');
     expect(html).toContain('reading-process-unknown">1 结果未记录');
-    expect(html).not.toContain('class="tool-call-row"');
+    expect(html).not.toContain('data-tool-id=');
   });
 
   it.each(['search', 'failure'] as const)('reveals the containing process and tool group for a %s target', kind => {
     const html = render(`reading-reveal-${kind}`, [tool('target', 'failed'), event('answer', 'assistant')], { readingMode: true, target: { kind, toolId: 'target' } });
     expect(html).toContain('data-tool-id="target"');
     expect(html).toMatch(/class="reading-process-toggle" aria-expanded="true"/);
-    expect(html).toContain('class="tool-call-row"');
   });
 
   it('remembers process choices independently by session and turn and leaves tool preferences intact', () => {
     const events = [event('progress', 'commentary', 'REMEMBERED_PROCESS'), tool('remembered')];
     eventViewState.set('reading-state', readingProcessStateKey('turn', 'progress'), true);
-    toolGroupViewState.set('reading-state', 'turn:remembered', { open: true, tab: 'result' });
+    toolGroupViewState.set('reading-state', 'turn:remembered', true);
     const html = render('reading-state', events, { readingMode: true });
     expect(html).toContain('REMEMBERED_PROCESS');
     expect(html).toContain('data-tool-id="remembered"');
     expect(render('reading-other-session', events, { readingMode: true })).not.toContain('REMEMBERED_PROCESS');
     expect(eventViewState.get('reading-state', readingProcessStateKey('different-turn', 'progress'))).toBeUndefined();
-    expect(toolGroupViewState.get('reading-state', 'turn:remembered')?.open).toBe(true);
+    expect(toolGroupViewState.get('reading-state', 'turn:remembered')).toBe(true);
   });
 });
