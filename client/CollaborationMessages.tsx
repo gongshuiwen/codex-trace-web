@@ -25,12 +25,12 @@ export function CollaborationMessages({ messages, selectedId, labels, revisions,
   }, [focused]);
 
   return <section className="collab-message-feed" ref={sectionRef} aria-label={selectedId ? '代理协作消息' : '未关联消息列表'}>
-    {selectedId && <>
-      <h4 className="collab-message-title"><span>{focusing ? '时间轴选中的消息' : `${labels.get(selectedId) || '所选代理'} 的消息`}</span><small>{focusing ? focused.length : messages.length} 条已载入</small></h4>
+    {selectedId && (messages.length > 0 || focusing) && <>
+      <h4 className="collab-message-title">消息</h4>
       {focusing ? <div className="collab-message-focus-bar" role="status"><span>已定位 {focused.length} 条消息</span><button type="button" className="text-button" onClick={() => { setFilter('all'); setVisibleCount(8); onClearFocus?.(); }}>返回全部消息</button></div> : <div className="collab-message-filters" aria-label="消息方向">{([['all', '全部', messages.length], ['received', '收到', received.length], ['sent', '发出', sent.length]] as const).map(([id, label, count]) => <button type="button" key={id} aria-pressed={filter === id} onClick={() => { setFilter(id); setVisibleCount(8); }}>{label}<span>{count}</span></button>)}</div>}
     </>}
     {start > 0 && <button className="text-button collab-earlier-messages" type="button" onClick={() => setVisibleCount(count => count + 12)}>显示更早消息（还有 {start} 条）</button>}
-    {filtered.length === 0 && <p className="collab-empty">{filter === 'all' ? emptyText || '没有可展示的消息。' : `已载入记录中没有${filter === 'received' ? '收到' : '发出'}的消息。`}</p>}
-    <ol className="collab-messages">{filtered.slice(start).map(message => <li key={messageKey(message)} className={focusing ? 'highlighted' : undefined} data-message-key={messageKey(message)}><CollaborationMessageCard message={message} labels={labels} revision={revisions.get(message.sessionId)} showDate onNavigate={() => onNavigate(message.sessionId, message.turnId)} /></li>)}</ol>
+    {filtered.length === 0 && <p className="collab-empty">{!messages.length || filter === 'all' ? emptyText || '没有可展示的消息。' : `已载入记录中没有${filter === 'received' ? '收到' : '发出'}的消息。`}</p>}
+    {filtered.length > 0 && <ol className="collab-messages">{filtered.slice(start).map(message => <li key={messageKey(message)} className={focusing ? 'highlighted' : undefined} data-message-key={messageKey(message)}><CollaborationMessageCard message={message} labels={labels} revision={revisions.get(message.sessionId)} showDate onNavigate={() => onNavigate(message.sessionId, message.turnId)} /></li>)}</ol>}
   </section>;
 }

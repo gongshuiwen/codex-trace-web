@@ -71,7 +71,7 @@ describe('reading mode turn rendering', () => {
     expect(compact).toContain('USER_REQUEST');
     expect(compact).toContain('FINAL_BODY');
     expect(compact).toContain('data-event-id="answer"');
-    expect(compact).toContain('跳到最终答复');
+    expect(compact).not.toContain('跳到最终答复');
   });
 
   it('keeps supplemental users, notices and compaction anchors visible while process content is collapsed', () => {

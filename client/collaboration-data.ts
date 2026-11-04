@@ -169,3 +169,13 @@ export function layoutCollaborationTree(tree: SessionTree, expanded: ReadonlySet
   }
   return { nodes, edges, width, height };
 }
+
+/** Keep wide trees readable by stacking nodes in preorder, with depth as indentation. */
+export function fitCollaborationTree(layout: CollaborationTreeLayout, availableWidth: number): CollaborationTreeLayout & { outline: boolean } {
+  if (!availableWidth || layout.width <= availableWidth) return { ...layout, outline: false };
+  const depth = Math.max(0, ...layout.nodes.map(node => node.depth));
+  const indent = depth ? Math.min(horizontalStep, Math.max(0, availableWidth - COLLABORATION_NODE_WIDTH - 32) / depth) : 0;
+  const nodes = layout.nodes.map((node, index) => ({ ...node, x: node.depth * indent, y: index * (COLLABORATION_NODE_HEIGHT + 46) }));
+  return { nodes, edges: layout.edges, width: depth * indent + COLLABORATION_NODE_WIDTH + 32,
+    height: nodes.length ? nodes.at(-1)!.y + COLLABORATION_NODE_HEIGHT : 0, outline: true };
+}

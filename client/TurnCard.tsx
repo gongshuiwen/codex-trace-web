@@ -65,6 +65,8 @@ export function TurnCard({ turn, sessionId, session, revision, onUsage, targetTu
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [copied, setCopied] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [answerFar, setAnswerFar] = useState(false);
   const [settledRequest, setSettledRequest] = useState(() => cached?.revision === revision ? `${sessionId}:${turn.id}:${revision}:0` : '');
   const requestKey = `${sessionId}:${turn.id}:${revision}:${retry}`;
   const ready = settledRequest === requestKey;
@@ -109,6 +111,21 @@ export function TurnCard({ turn, sessionId, session, revision, onUsage, targetTu
   const latestCommentary = turn.status === 'running' ? latestReadingCommentary(readingTimeline) : undefined;
   const lastProcess = readingTimeline.findLast(entry => entry.kind === 'reading-process');
   const finalAnswer = detail?.events.findLast(event => event.kind === 'assistant');
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content || !finalAnswer) { setAnswerFar(false); return; }
+    const viewport = content.closest<HTMLElement>('.timeline-viewport');
+    const measure = () => {
+      const answer = [...content.querySelectorAll<HTMLElement>('.final-answer')].at(-1);
+      const distance = answer ? answer.getBoundingClientRect().top - content.getBoundingClientRect().top : 0;
+      setAnswerFar(distance > Math.max(280, (viewport?.clientHeight ?? 600) * .65));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    if (viewport) observer.observe(viewport);
+    measure();
+    return () => observer.disconnect();
+  }, [finalAnswer?.id, detail?.events, readingMode]);
   function renderEntry(entry: ReadingTimelineEntry) {
     return entry.kind === 'tool-group'
       ? <ToolGroup key={`group-${entry.id}`} group={entry} turnId={turn.id} sessionId={sessionId} revision={revision} target={activeTarget} preserveLayout={preserveLayout} onSearchReady={toolReady} />
@@ -120,12 +137,12 @@ export function TurnCard({ turn, sessionId, session, revision, onUsage, targetTu
   const previousModel = session?.turns.findLast(candidate => candidate.index < turn.index)?.model?.trim();
   const showModel = !model || !previousModel || model !== previousModel;
   return <article className={`turn-card ${targetTurn === turn.id ? 'target-turn' : ''}`} data-turn-id={turn.id} data-turn-ready={layoutReady ? 'true' : 'false'}>
-    <div className="turn-heading"><div className="turn-order">第 {turn.index + 1} 轮</div><div className="turn-heading-meta"><span>用户请求</span><time dateTime={turn.startedAt}>{clock(turn.startedAt)}</time></div><button className="turn-link" title="复制此轮链接" aria-label="复制此轮链接" onClick={() => void copyLink()}>{copied ? <Check size={14} /> : <Copy size={14} />}</button></div>
+    <div className="turn-heading"><div className="turn-order">第 {turn.index + 1} 轮</div><div className="turn-heading-meta"><time dateTime={turn.startedAt}>{clock(turn.startedAt)}</time></div><button className="turn-link" title="复制此轮链接" aria-label="复制此轮链接" onClick={() => void copyLink()}>{copied ? <Check size={14} /> : <Copy size={14} />}</button></div>
     <UserPrompt text={prompt} sessionId={sessionId} stateKey={`prompt:${turn.id}`} anchorId={`user-prompt:${turn.id}`} preserveLayout={preserveLayout} />
-    <div className="assistant-heading"><strong title={model ? `模型：${model}` : '模型未记录'}>Codex</strong><span className={showModel ? 'model-label' : 'sr-only'}><span className="sr-only">模型：</span>{model || '模型未记录'}</span><span className={`status-label ${turn.status}`}><Circle size={6} fill="currentColor" />{statusLabels[turn.status]}</span>{finalAnswer && onNavigateFinalAnswer && <button type="button" className="turn-final-jump" onClick={() => onNavigateFinalAnswer(finalAnswer.id)}><ArrowDown size={13} aria-hidden="true" />跳到最终答复</button>}</div>
-    <div className="turn-content">{error && <div className="inline-error" role="alert">{error}<button className="text-button" onClick={() => setRetry(value => value + 1)}>重试</button></div>}{!detail && !error && <div className="turn-loading"><span className="pulse" />正在读取这一轮…</div>}{detail?.warnings.map((warning, index) => <div className="timeline-notice" key={index}><AlertTriangle size={13} />{warning}</div>)}{targetMissing && <div className="timeline-notice" role="status">目标调用已不在当前日志中，请重新搜索。</div>}{compactionMissing && <div className="timeline-notice" role="status">目标压缩记录已不在当前日志中，请刷新压缩列表。</div>}{readingTimeline.map(entry => entry.kind === 'reading-process'
+    <div className="assistant-heading"><strong title={model ? `模型：${model}` : '模型未记录'}>Codex</strong><span className={showModel ? 'model-label' : 'sr-only'}><span className="sr-only">模型：</span>{model || '模型未记录'}</span><span className={`status-label ${turn.status}`}><Circle size={6} fill="currentColor" />{statusLabels[turn.status]}</span>{answerFar && finalAnswer && onNavigateFinalAnswer && <button type="button" className="turn-final-jump" onClick={() => onNavigateFinalAnswer(finalAnswer.id)}><ArrowDown size={13} aria-hidden="true" />跳到最终答复</button>}</div>
+    <div className="turn-content" ref={contentRef}>{error && <div className="inline-error" role="alert">{error}<button className="text-button" onClick={() => setRetry(value => value + 1)}>重试</button></div>}{!detail && !error && <div className="turn-loading"><span className="pulse" />正在读取这一轮…</div>}{detail?.warnings.map((warning, index) => <div className="timeline-notice" key={index}><AlertTriangle size={13} />{warning}</div>)}{targetMissing && <div className="timeline-notice" role="status">目标调用已不在当前日志中，请重新搜索。</div>}{compactionMissing && <div className="timeline-notice" role="status">目标压缩记录已不在当前日志中，请刷新压缩列表。</div>}{readingTimeline.map(entry => entry.kind === 'reading-process'
       ? <ReadingProcess key={`process-${entry.id}`} group={entry} sessionId={sessionId} turnId={turn.id} target={activeTarget} preserveLayout={preserveLayout} latestCommentary={latestCommentary?.groupId === entry.id ? latestCommentary.event : undefined} showActivity={turn.status === 'running' && !latestCommentary && lastProcess?.id === entry.id} renderEntry={renderEntry} readingMode={readingMode} />
       : renderEntry(entry))}{readingMode && detail && turn.status === 'running' && !lastProcess && <p className="reading-process-activity turn-reading-activity" role="status"><span className="pulse" />正在等待新的执行记录…</p>}</div>
-    <div className="turn-footer"><span>{turn.toolCount} 次工具调用</span><span className="separator" aria-hidden="true">·</span><span>{tokens(turn.usage.tokens?.totalTokens)} tokens</span><span className="separator" aria-hidden="true">·</span><span>{turn.usage.completeness === 'partial' ? '至少 ' : ''}{turn.usage.requestCount} 次模型调用</span><button onClick={() => onUsage(turn.id)}>查看本轮用量<ArrowUpRight size={13} /></button></div>
+    <div className="turn-footer"><button type="button" aria-label="查看本轮用量" title={`${turn.toolCount} 次工具调用 · ${turn.usage.completeness === 'partial' ? '至少 ' : ''}${turn.usage.requestCount} 次模型调用`} onClick={() => onUsage(turn.id)}>本轮用量<span>{turn.usage.tokens ? `${tokens(turn.usage.tokens.totalTokens)} tokens` : '未记录'}{turn.usage.completeness === 'partial' ? '（部分记录）' : ''}</span><ArrowUpRight size={13} aria-hidden="true" /></button></div>
   </article>;
 }

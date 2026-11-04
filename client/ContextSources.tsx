@@ -29,7 +29,6 @@ export function ContextSources({ sessionId, request, category, onNavigateTurn }:
     return () => controller.abort();
   }, [sessionId, request.id, request.turnId, category, offset, retry]);
   return <div className="context-sources" aria-label="上下文来源明细">
-    <p className="context-component-note">显示日志中的候选来源及截取的文本预览；token 数是估算，不代表这些内容全部进入了实际请求。</p>
     {data && <>
       <SourceEntries sources={data.sources} onNavigateTurn={onNavigateTurn} />
       {data.sources.length === 0 && <p className="detail-note">没有可还原的来源记录，未知不表示零。</p>}

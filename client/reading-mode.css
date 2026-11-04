@@ -20,7 +20,6 @@
 }
 
 .turn-heading-meta { display: flex; min-width: 0; align-items: center; gap: 12px; }
-.turn-heading-meta > span { color: var(--text); font-weight: 500; }
 .turn-heading-meta time { white-space: nowrap; }
 .turn-link {
   display: inline-flex;
@@ -72,7 +71,6 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-.turn-footer .separator { color: var(--control); }
 .turn-footer > button {
   display: inline-flex;
   min-height: 36px;
@@ -86,6 +84,7 @@
   color: var(--soft);
 }
 .turn-footer > button:hover { color: var(--text); background: var(--hover); }
+.turn-footer > button > span { color: var(--muted); }
 
 .reading-process { margin: 10px 0 20px; border-radius: var(--radius-control); background: var(--bg); }
 .reading-process-toggle { display: flex; width: 100%; min-height: 40px; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--soft); text-align: left; font-size: 13px; }

@@ -1,6 +1,4 @@
 .context-analysis { border-top:1px solid var(--border); margin:20px 0 16px; padding-top:16px; color:var(--soft); font-size:14px; }
-.context-analysis-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--text); font-size:14px; font-weight:600; }
-.context-estimate-label { color:var(--muted); font-size:12px; font-weight:400; }
 .context-input-baseline { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px 16px; margin-top:16px; padding-bottom:12px; border-bottom:1px solid var(--border); }
 .context-input-baseline > span { color:var(--muted); font-size:12px; }
 .context-input-baseline > strong { color:var(--text); font:500 18px/1.5 var(--font-sans); font-variant-numeric:tabular-nums; }
@@ -8,7 +6,7 @@
 .context-loading { display:flex; align-items:center; gap:8px; padding:16px 0; color:var(--muted); font-size:12px; }
 .context-analysis-error { display:flex; flex-direction:column; gap:8px; padding:12px 0; color:var(--danger); font-size:12px; line-height:1.8; overflow-wrap:anywhere; }
 .context-analysis-error > button { display:flex; align-items:center; align-self:flex-start; gap:6px; min-height:34px; padding:5px 8px; border:1px solid var(--control); border-radius:4px; background:var(--panel); color:var(--soft); font-size:12px; }
-.context-intro,.context-reconciliation-note { margin:12px 0 0; color:var(--muted); font-size:12px; line-height:1.8; }
+.context-intro { margin:12px 0 0; color:var(--muted); font-size:12px; line-height:1.8; }
 .context-components { margin-top:12px; }
 .context-component { padding:14px 0; border-bottom:1px solid var(--border); }
 .context-component:last-child { border-bottom:0; }
@@ -27,7 +25,6 @@
 .context-meter-track { width:100%; height:3px; background:var(--border); }
 .context-meter-track > span { display:block; min-width:0; height:3px; background:var(--accent); }
 .context-component-note { margin:8px 0 0; color:var(--muted); font-size:12px; line-height:1.8; overflow-wrap:anywhere; }
-.context-component > summary > .context-component-note { display:block; }
 .context-sampled-tag { display:inline-block; margin-left:6px; color:var(--warning); }
 .context-reconciliation { margin:12px 0 0; padding-top:12px; border-top:1px solid var(--border); }
 .context-reconciliation > div { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-top:8px; }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionActivity, SessionSummary, TurnSummary } from '../shared/types';
 import { buildSessionTree } from '../client/session-tree';
-import { collectCollaborationMessages, collaborationRounds, layoutCollaborationTree, type CollaborationEntry } from '../client/collaboration-data';
+import { collectCollaborationMessages, collaborationRounds, fitCollaborationTree, layoutCollaborationTree, type CollaborationEntry } from '../client/collaboration-data';
 
 const timestamp = '2026-11-03T00:00:00Z';
 const usage = { tokens: null, requestCount: 0, completeness: 'unknown' as const, latestInputTokens: null, contextWindow: null };
@@ -104,6 +104,36 @@ it('uses only each loaded session own rounds and keeps identical turn IDs in sep
 });
 
 describe('collaboration tree layout', () => {
+  it('fits a wide sibling group without clipping the root, shrinking nodes or losing relationships', () => {
+    const tree = buildSessionTree([session('root'), ...Array.from({ length: 13 }, (_, index) => session(`child-${index}`, 'root'))]);
+    const layout = layoutCollaborationTree(tree, new Set(['root']));
+    const fitted = fitCollaborationTree(layout, 640);
+    expect(fitted.outline).toBe(true);
+    expect(fitted.width).toBeLessThanOrEqual(640);
+    expect(fitted.nodes[0]).toMatchObject({ x: 0, y: 0 });
+    expect(fitted.nodes.map(node => node.session.id)).toEqual(layout.nodes.map(node => node.session.id));
+    expect(fitted.edges).toEqual(layout.edges);
+    for (let index = 0; index < fitted.nodes.length; index++) {
+      const node = fitted.nodes[index];
+      expect(node.x).toBeGreaterThanOrEqual(0);
+      expect(node.x + 180).toBeLessThanOrEqual(fitted.width);
+      if (index) expect(node.y).toBeGreaterThanOrEqual(fitted.nodes[index - 1].y + 82);
+    }
+    expect(layout.nodes[0].x).toBeGreaterThan(640);
+    expect(fitCollaborationTree(layout, layout.width)).toEqual({ ...layout, outline: false });
+  });
+
+  it('keeps deep expanded branches within the available width', () => {
+    const items = Array.from({ length: 25 }, (_, index) => session(`branch-${index}`, index ? `branch-${index - 1}` : undefined));
+    items.push(session('sibling', 'branch-0'));
+    const layout = layoutCollaborationTree(buildSessionTree(items), new Set(items.map(item => item.id)));
+    const fitted = fitCollaborationTree(layout, 300);
+    expect(fitted.outline).toBe(true);
+    expect(fitted.nodes).toHaveLength(items.length);
+    expect(Math.max(...fitted.nodes.map(node => node.x + 180))).toBeLessThanOrEqual(300);
+    expect(fitted.edges).toEqual(layout.edges);
+  });
+
   it('places leaves in stable columns, centers parents, and uses fixed node and gap sizes', () => {
     const tree = buildSessionTree([session('root'), session('a', 'root'), session('b', 'root'), session('aa', 'a'), session('ab', 'a')]);
     const layout = layoutCollaborationTree(tree, new Set(['root', 'a']));

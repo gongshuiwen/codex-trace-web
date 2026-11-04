@@ -51,11 +51,11 @@ export function ToolGroup({ group, turnId, sessionId, revision, target, preserve
         meta={<span className="tool-group-counts">
               {group.counts.running > 0 && <span className="tool-group-running">{group.counts.running} 运行中</span>}
               {group.counts.unknown > 0 && <span className="tool-group-unknown">{group.counts.unknown} 结果未记录</span>}
-              {group.counts.completed > 0 && <span>{group.counts.completed} 已返回</span>}
+              {group.counts.completed > 0 && group.counts.completed < group.events.length && <span>{group.counts.completed} 已返回</span>}
         </span>} />
       {failure && <button type="button" className="tool-group-failure-action" aria-label={`查看本组首条失败调用：${failure.title}，共 ${group.counts.failed} 次失败`} title={failure.preview} onClick={revealFailure}><CircleX size={13} aria-hidden="true" /><span>{group.counts.failed} 失败</span></button>}
     </div>
-    {!open && failure && <p className="tool-group-diagnostic" title={failure.preview}><span>首条失败</span><span>{failure.preview}</span></p>}
+    {!open && failure && <p className="tool-group-diagnostic" title={failure.preview}>{failure.preview}</p>}
     <div id={bodyId} className="record-group-entries" hidden={!open}>
       {open && group.events.map(event => <ToolCard key={event.tool.id} eventId={event.id} tool={event.tool} turnId={turnId} sessionId={sessionId} revision={revision}
         searchTarget={hasTarget && target.toolId === event.tool.id ? target : undefined} onSearchReady={onSearchReady}

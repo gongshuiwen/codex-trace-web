@@ -3,7 +3,7 @@ import { ArrowUpRight, ChevronDown, ChevronRight, GitBranch, LoaderCircle, Refre
 import type { SessionActivity, SessionDetail, SessionSummary } from '../shared/types';
 import { clock, exactTokens, sessionDisplayName, sessionTooltip, statusLabels } from './format';
 import { buildSessionTree, sessionAncestors } from './session-tree';
-import { collectCollaborationMessages, collaborationRounds, layoutCollaborationTree, type CollaborationEntry, type CollaborationRecord } from './collaboration-data';
+import { collectCollaborationMessages, collaborationRounds, fitCollaborationTree, layoutCollaborationTree, type CollaborationEntry, type CollaborationRecord } from './collaboration-data';
 import { useCollaboration } from './useCollaboration';
 import { createParticipantLabels, messageKey } from './collaboration-message';
 import { CollaborationMessages } from './CollaborationMessages';
@@ -26,7 +26,18 @@ function RelationshipGraph({ layout, currentId, selectedId, ancestors, expanded,
   messages: CollaborationRecord[]; loading: ReadonlySet<string>; onSelect: (id: string) => void; onToggle: (id: string) => void;
 }) {
   const arrowId = useId();
-  const nodes = new Map(layout.nodes.map(node => [node.session.id, node]));
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [availableWidth, setAvailableWidth] = useState(0);
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    const observer = new ResizeObserver(([entry]) => setAvailableWidth(entry.contentRect.width));
+    observer.observe(scroll);
+    return () => observer.disconnect();
+  }, []);
+  const fitted = useMemo(() => fitCollaborationTree(layout, availableWidth), [layout, availableWidth]);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollLeft = 0; }, [fitted.outline]);
+  const nodes = new Map(fitted.nodes.map(node => [node.session.id, node]));
   const highlighted = new Set([selectedId, ...ancestors]);
   const routes = new Map<string, { source: string; target: string; count: number }>();
   for (const { senderId, recipientId } of messages) {
@@ -37,17 +48,22 @@ function RelationshipGraph({ layout, currentId, selectedId, ancestors, expanded,
     if (route) route.count++;
     else routes.set(key, { source: senderId, target: recipientId, count: 1 });
   }
-  return <div className="collab-graph-scroll" aria-label="代理关系图">
-    <div className="collab-graph" style={{ width: layout.width, height: layout.height + 60 }}>
-      <svg width={layout.width} height={layout.height + 60} aria-hidden="true">
+  return <div className="collab-graph-scroll" aria-label="代理关系图" ref={scrollRef} data-layout={fitted.outline ? 'outline' : 'tree'}>
+    <div className="collab-graph" style={{ width: fitted.width, height: fitted.height + 60 }}>
+      <svg width={fitted.width} height={fitted.height + 60} aria-hidden="true">
         <defs><marker id={arrowId} markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" className="collab-arrow" /></marker></defs>
         {layout.edges.map(({ parentId, childId }) => {
           const parent = nodes.get(parentId)!, child = nodes.get(childId)!;
           const sx = parent.x + 90, sy = parent.y + 82, tx = child.x + 90, ty = child.y;
-          return <path key={childId} className={`collab-parent-edge ${highlighted.has(parentId) && highlighted.has(childId) ? 'selected' : ''}`} d={`M${sx} ${sy} V${sy + 42} H${tx} V${ty}`} />;
+          return <path key={childId} className={`collab-parent-edge ${highlighted.has(parentId) && highlighted.has(childId) ? 'selected' : ''}`} d={fitted.outline ? `M${parent.x + 12} ${sy} V${child.y + 41} H${child.x}` : `M${sx} ${sy} V${sy + 42} H${tx} V${ty}`} />;
         })}
         {[...routes].map(([key, route]) => {
           const source = nodes.get(route.source)!, target = nodes.get(route.target)!;
+          if (fitted.outline) {
+            const sx = source.x + 180, sy = source.y + 41, tx = target.x + 180, ty = target.y + 41;
+            const bend = Math.max(sx, tx) + 24;
+            return <g key={key}><path className="collab-message-edge" markerEnd={`url(#${arrowId})`} d={`M${sx} ${sy} C${bend} ${sy} ${bend} ${ty} ${tx} ${ty}`} /><text className="collab-edge-count" x={bend} y={(sy + ty) / 2} textAnchor="end">{route.count} 条</text></g>;
+          }
           const sameRow = source.y === target.y, down = source.y < target.y;
           const sx = source.x + 90, sy = source.y + (sameRow || down ? 82 : 0);
           const tx = target.x + 90, ty = target.y + (sameRow || !down ? 82 : 0);
@@ -55,7 +71,7 @@ function RelationshipGraph({ layout, currentId, selectedId, ancestors, expanded,
           return <g key={key}><path className="collab-message-edge" markerEnd={`url(#${arrowId})`} d={`M${sx} ${sy} C${sx + bend} ${middle} ${tx + bend} ${middle} ${tx} ${ty}`} /><text className="collab-edge-count" x={(sx + tx) / 2 + bend * .75} y={sameRow ? middle - 8 : middle - 5} textAnchor="middle">{route.count} 条</text></g>;
         })}
       </svg>
-      {layout.nodes.map(({ session: value, x, y }) => <div className="collab-graph-node" key={value.id} style={{ left: x, top: y }}>
+      {fitted.nodes.map(({ session: value, x, y }) => <div className="collab-graph-node" key={value.id} style={{ left: x, top: y }}>
         <AgentNode value={value} current={value.id === currentId} selected={value.id === selectedId} onSelect={() => onSelect(value.id)} />
         {(value.childCount ?? layout.edges.filter(edge => edge.parentId === value.id).length) > 0 && <button type="button" className="collab-expand" aria-label={`${expanded.has(value.id) ? '收起' : '展开'}${sessionDisplayName(value)}的子代理`} aria-expanded={expanded.has(value.id)} onClick={() => onToggle(value.id)}>
           {loading.has(value.id) ? <LoaderCircle size={12} className="spin" /> : expanded.has(value.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}{value.childCount ?? '下级'}
@@ -148,6 +164,8 @@ export function CollaborationView({ session, activity, onSelectSession, onNaviga
   const related = messages.filter(message => message.senderId === selected.id || message.recipientId === selected.id);
   const unlinked = messages.filter(message => !message.senderId || !message.recipientId);
   const selectedParent = tree.parents.get(selected.id);
+  const task = selectedEntry?.detail.turns[0]?.prompt || selected.title;
+  const taskRepeatsTitle = Boolean(task && task.replace(/\s+/g, ' ').trim().startsWith(sessionDisplayName(selected).replace(/\s+/g, ' ').trim()));
   const rootMissing = layout.nodes.find(node => node.session.parentId && !tree.byId.has(node.session.parentId));
 
   useEffect(() => {
@@ -180,7 +198,7 @@ export function CollaborationView({ session, activity, onSelectSession, onNaviga
     setSelectedId(id); setFocusedKeys(records.map(messageKey)); load(id);
   }
 
-  return <section className="collaboration-view" aria-label="子代理协作视图">
+  return <section className="collaboration-view" aria-label="子代理协作视图" data-mode={mode}>
     <h2 className="sr-only">子代理协作</h2>
     <div className="collab-workspace">
       <div className="collab-toolbar">
@@ -204,10 +222,9 @@ export function CollaborationView({ session, activity, onSelectSession, onNaviga
         <aside className="collab-inspector" aria-label="代理详情" ref={inspectorRef}>
           <button type="button" className="text-button collab-back-to-tree" onClick={() => canvasRef.current?.scrollIntoView({ block: 'start' })}>返回关系<ChevronRight size={12} /></button>
           <h3>{sessionDisplayName(selected)}</h3>
-          <code className="collab-detail-path">{selected.agentName || selected.id}</code>
           <div className="collab-agent-summary"><span>{exactTokens(selected.usage.tokens?.totalTokens)} tokens</span><span>{selected.turnCount ? `本轮${statusLabels[selected.status]}` : '暂无轮次'}</span></div>
-          <details className="collab-task-description" key={`task-${selected.id}`}><summary><span>{selectedEntry?.detail.turns[0]?.prompt || selected.title || '任务说明未记录。'}</span><ChevronDown size={12} aria-hidden="true" /></summary></details>
-          <details className="collab-agent-info" key={`info-${selected.id}`}><summary>更多信息<ChevronDown size={12} aria-hidden="true" /></summary><dl className="collab-detail-meta"><dt>派生自</dt><dd>{selectedParent ? sessionDisplayName(tree.byId.get(selectedParent)!.session) : selected.parentId ? '尚未索引' : '—'}</dd><dt>模型调用</dt><dd>{selected.usage.completeness === 'unknown' ? '未记录' : `${selected.usage.completeness === 'partial' ? '≥ ' : ''}${selected.usage.requestCount.toLocaleString('zh-CN')} 次`}</dd><dt>模型</dt><dd>{selected.model || '未记录'}</dd></dl></details>
+          {task && !taskRepeatsTitle && <details className="collab-task-description" key={`task-${selected.id}`}><summary><span>{task}</span><ChevronDown size={12} aria-hidden="true" /></summary></details>}
+          <details className="collab-agent-info" key={`info-${selected.id}`}><summary>更多信息<ChevronDown size={12} aria-hidden="true" /></summary><dl className="collab-detail-meta"><dt>会话 ID</dt><dd><code>{selected.id}</code></dd>{selected.agentName && <><dt>任务路径</dt><dd><code>{selected.agentName}</code></dd></>}<dt>派生自</dt><dd>{selectedParent ? sessionDisplayName(tree.byId.get(selectedParent)!.session) : selected.parentId ? '尚未索引' : '—'}</dd><dt>模型调用</dt><dd>{selected.usage.completeness === 'unknown' ? '未记录' : `${selected.usage.completeness === 'partial' ? '≥ ' : ''}${selected.usage.requestCount.toLocaleString('zh-CN')} 次`}</dd><dt>模型</dt><dd>{selected.model || '未记录'}</dd>{taskRepeatsTitle && <><dt>任务</dt><dd className="collab-task-full">{task}</dd></>}</dl></details>
           {selected.usage.completeness !== 'complete' && <p className="collab-note">{selected.usage.completeness === 'partial' ? '用量记录不完整。' : '用量尚未记录。'}</p>}
           {selected.id !== session.session.id && <button className="text-button collab-open-session" type="button" onClick={() => onSelectSession(selected)}>打开会话<ArrowUpRight size={13} /></button>}
           {loading.has(selected.id) && <p className="turn-loading" role="status"><LoaderCircle size={14} className="spin" />正在读取此代理…</p>}
