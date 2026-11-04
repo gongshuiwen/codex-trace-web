@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { ArrowUpRight, ChevronLeft, ChevronRight, Minimize2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Minimize2 } from 'lucide-react';
 import type { SessionActivity } from '../shared/types';
-import type { Inspection } from './TurnCard';
-import { clock, exactTokens, tokens } from './format';
+import { clock, tokens } from './format';
 import { compactionX, nearestRequestIndex, requestPointLabel, tokenPlot, TOKEN_PLOT, TOKEN_TIMELINE_PAGE_SIZE } from './token-timeline';
 import type { TokenMetric, TokenSeries } from './token-timeline';
 import './TokenTimeline.css';
@@ -18,15 +17,14 @@ const series = [
 ] as const;
 const tokenIconButton = 'icon-button inline-flex size-[var(--control-height)] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--accent-light)] hover:text-[var(--accent-strong)] disabled:cursor-default disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]';
 
-export function TokenTimeline({ activity, onInspect, onNavigateTurn }: {
+export function TokenTimeline({ activity, selectedId, onSelectRequest, onNavigateTurn }: {
   activity: SessionActivity;
-  onInspect: (selection: Inspection) => void;
+  selectedId: string | null; onSelectRequest: (requestId: string) => void;
   onNavigateTurn: (turnId: string) => void;
 }) {
   const [page, setPage] = useState(0);
   const [mode, setMode] = useState<'overview' | 'detail'>('overview');
   const [metric, setMetric] = useState<TokenMetric>('all');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [width, setWidth] = useState(480);
   const chartRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<{ id: string; index: number } | null>(null);
@@ -40,7 +38,8 @@ export function TokenTimeline({ activity, onInspect, onNavigateTurn }: {
     return () => observer.disconnect();
   }, [activity.requests.length === 0]);
   const plot = useMemo(() => tokenPlot(activity.requests, page, { mode, width, metric }), [activity.requests, page, mode, width, metric]);
-  const selected = plot.points.find(point => point.request.id === selectedId) ?? plot.points[0];
+  const selectedIndex = activity.requests.findIndex(request => request.id === selectedId);
+  const selected = selectedIndex >= 0 ? { index: selectedIndex, request: activity.requests[selectedIndex] } : null;
   const compactions = activity.compactions.flatMap((marker, index) => {
     const x = compactionX(marker.beforeRequestIndex, plot);
     return x == null ? [] : [{ marker, index, x }];
@@ -48,11 +47,10 @@ export function TokenTimeline({ activity, onInspect, onNavigateTurn }: {
   const visibleSeries = series.filter(([field]) => metric === 'all' || metric === field);
   const primarySeries: TokenSeries = metric === 'all' ? 'inputTokens' : metric;
   const hasSnapshots = activity.requests.some(request => request.source === 'snapshot-delta');
-  const inspect = (request: SessionActivity['requests'][number]) => {
-    if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
-    focusFrameRef.current = null;
-    onInspect({ turnId: request.turnId, requestId: request.id });
-  };
+  useEffect(() => {
+    const index = activity.requests.findIndex(request => request.id === selectedId);
+    if (mode === 'detail' && index >= 0) setPage(Math.floor(index / TOKEN_TIMELINE_PAGE_SIZE));
+  }, [selectedId, mode, activity.requests]);
   function revealPoint(index: number) {
     const chart = chartRef.current;
     const point = chart?.querySelector<SVGGElement>(`[data-request-index="${index}"]`);
@@ -71,13 +69,18 @@ export function TokenTimeline({ activity, onInspect, onNavigateTurn }: {
       // Keyboard intent is synchronous, while the roving DOM focus is deferred.
       // Enter (or another arrow) before the next frame must use this new record.
       cursorRef.current = { id: request.id, index };
-      setSelectedId(request.id);
+      if (request.id !== selectedId) onSelectRequest(request.id);
       if (mode === 'detail') {
         setPage(Math.floor(index / TOKEN_TIMELINE_PAGE_SIZE));
         requestAnimationFrame(() => revealPoint(index));
       }
     }
   };
+  function revealDetails(index: number) {
+    selectIndex(index);
+    const details = document.querySelector<HTMLElement>('.usage-calls');
+    if (details) { details.tabIndex = -1; details.focus({ preventScroll: true }); details.scrollIntoView({ block: 'start' }); }
+  }
   function movePoint(event: KeyboardEvent<SVGGElement>, index: number) {
     const cursor = cursorRef.current;
     const current = cursor && activity.requests[cursor.index]?.id === cursor.id ? cursor.index : index;
@@ -86,7 +89,7 @@ export function TokenTimeline({ activity, onInspect, onNavigateTurn }: {
     if (next === null) {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        inspect(activity.requests[current]!);
+        revealDetails(current);
       }
       return;
     }
@@ -107,8 +110,7 @@ export function TokenTimeline({ activity, onInspect, onNavigateTurn }: {
   const markedPoints = mode === 'overview' && plot.points.length > 200
     ? plot.points.filter(point => point.index === selected?.index || point.request.source !== 'record')
     : plot.points;
-  return <section className="token-timeline min-w-0 text-[var(--text)]" aria-label="Token 与压缩时间轴">
-    <h2 className="sr-only">Token 与压缩</h2>
+  return <section className="token-timeline min-w-0 text-[var(--text)]" aria-label="调用趋势与压缩时间轴">
     <div className="token-timeline-controls">
       {activity.requests.length > 0 && <div className="token-timeline-modes flex gap-1 rounded-md bg-[var(--code)] p-0.5 max-[560px]:gap-0" aria-label="趋势图范围">{([['overview', '全局概览'], ['detail', '逐次记录']] as const).map(([id, label]) => <button key={id} type="button" className={`min-h-[var(--control-height)] rounded px-3 py-1 text-[12px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] max-[560px]:px-2 ${mode === id ? 'bg-[var(--accent-light)] font-medium text-[var(--accent-strong)]' : 'bg-transparent text-[var(--muted)] hover:bg-[var(--hover)]'}`} aria-pressed={mode === id} onClick={() => { if (selected) { selectIndex(selected.index); if (id === 'detail') setPage(Math.floor(selected.index / TOKEN_TIMELINE_PAGE_SIZE)); } setMode(id); }}>{label}</button>)}</div>}
       <div className="token-timeline-summary">
@@ -133,7 +135,7 @@ export function TokenTimeline({ activity, onInspect, onNavigateTurn }: {
             const y = point.y(primarySeries);
             const snapshot = point.request.source !== 'record';
             const isSelected = point.index === selected?.index;
-            return <g key={point.request.id} data-request-index={point.index} className={`token-timeline-point${snapshot ? ' token-timeline-snapshot' : ''}${isSelected ? ' selected' : ''}`} role="button" tabIndex={isSelected ? 0 : -1} aria-label={requestPointLabel(point.request, point.index)} aria-pressed={isSelected} onFocus={() => selectIndex(point.index)} onClick={event => { event.stopPropagation(); selectIndex(point.index); inspect(point.request); }} onKeyDown={event => movePoint(event, point.index)}>
+            return <g key={point.request.id} data-request-index={point.index} className={`token-timeline-point${snapshot ? ' token-timeline-snapshot' : ''}${isSelected ? ' selected' : ''}`} role="button" tabIndex={isSelected || !selected && point.index === 0 ? 0 : -1} aria-label={requestPointLabel(point.request, point.index)} aria-pressed={isSelected} onFocus={() => selectIndex(point.index)} onClick={event => { event.stopPropagation(); revealDetails(point.index); }} onKeyDown={event => movePoint(event, point.index)}>
               <title>{`${requestPointLabel(point.request, point.index)}\n${clock(point.request.timestamp)} · ${point.request.model || '模型未记录'}\n查看调用明细`}</title><rect className="token-point-hit" x={point.x - Math.min(12, plot.step / 2)} y={TOKEN_PLOT.top - 4} width={Math.min(24, plot.step)} height={TOKEN_PLOT.bottom - TOKEN_PLOT.top + 9} />
               {isSelected && <line className="token-point-cursor" x1={point.x} x2={point.x} y1={TOKEN_PLOT.top} y2={TOKEN_PLOT.bottom} />}
               <circle className="token-point-focus" cx={point.x} cy={y} r={7} />
@@ -154,11 +156,6 @@ export function TokenTimeline({ activity, onInspect, onNavigateTurn }: {
         </svg>
       </div>
       <div className="token-timeline-pagination mt-2 flex flex-wrap items-center justify-between gap-2 text-[12px] leading-5 text-[var(--muted)]"><span>{mode === 'overview' ? `全部 ${activity.requests.length.toLocaleString()} 条 · 按日志顺序` : `第 ${plot.start + 1}–${plot.end} 条 / 共 ${activity.requests.length.toLocaleString()} 条${plot.width > width ? ' · 可横向滚动' : ''}`}</span>{mode === 'detail' && <div className="flex items-center gap-2 tabular-nums"><button type="button" className={tokenIconButton} aria-label="上一页用量记录" disabled={plot.page === 0} onClick={() => selectIndex((plot.page - 1) * TOKEN_TIMELINE_PAGE_SIZE)}><ChevronLeft size={16} /></button><span>{plot.page + 1} / {plot.pages}</span><button type="button" className={tokenIconButton} aria-label="下一页用量记录" disabled={plot.page + 1 >= plot.pages} onClick={() => selectIndex((plot.page + 1) * TOKEN_TIMELINE_PAGE_SIZE)}><ChevronRight size={16} /></button></div>}</div>
-      {selected && <div className="token-selection relative mt-4 rounded-[7px] border border-[var(--border)] bg-[var(--panel)] px-4 py-3 max-[560px]:px-3">
-        <div className="token-selection-heading flex items-center justify-between gap-2 text-[12px] leading-5 text-[var(--soft)]"><span className="max-[560px]:max-w-[calc(100%_-_96px)]">第 {selected.index + 1} 条 · <span className={selected.request.source === 'record' ? undefined : 'text-[var(--warning)]'}>{selected.request.source === 'record' ? '模型调用' : '累计快照差值'}</span> · {clock(selected.request.timestamp)}</span><div className="flex gap-1"><button type="button" className={tokenIconButton} aria-label="上一次调用" disabled={selected.index === 0} onClick={() => selectIndex(selected.index - 1)}><ChevronLeft size={16} /></button><button type="button" className={tokenIconButton} aria-label="下一次调用" disabled={selected.index === activity.requests.length - 1} onClick={() => selectIndex(selected.index + 1)}><ChevronRight size={16} /></button></div></div>
-        <dl className="token-selection-values mt-1.5 mb-3 grid grid-cols-3 gap-4 tabular-nums max-[560px]:gap-3">{([['输入', selected.request.usage.inputTokens], ['输出', selected.request.usage.outputTokens], ['缓存读取', selected.request.usage.cachedInputTokens]] as const).map(([label, count]) => <div key={label}><dt className="text-[12px] leading-5 text-[var(--muted)]">{label}</dt><dd className="mt-1 ml-0 font-mono text-[14px] leading-5 wrap-anywhere text-[var(--text)]">{exactTokens(count)}</dd></div>)}</dl>
-        <button type="button" className="token-inspect-button inline-flex min-h-[var(--control-height)] items-center justify-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--accent-light)] px-3 py-1.5 text-[12px] text-[var(--accent-strong)] transition-colors hover:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]" onClick={() => inspect(selected.request)}>查看调用明细<ArrowUpRight size={14} /></button>
-      </div>}
     </>}
     {activity.compactions.length > 0 && <details className="token-compaction-events mt-4 text-[12px] leading-5 text-[var(--soft)]"><summary className="min-h-[var(--control-height)] cursor-pointer py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">压缩事件 · {activity.compactions.length.toLocaleString()} 次</summary><div className="token-compaction-links mt-2 flex flex-wrap gap-2" aria-label="压缩事件">{activity.compactions.map(marker => <button type="button" className="inline-flex min-h-[var(--control-height)] items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1.5 text-[12px] text-[var(--soft)] transition-colors hover:bg-[var(--hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]" key={marker.id} disabled={!marker.turnId} onClick={() => { if (marker.turnId) onNavigateTurn(marker.turnId); }} title={marker.turnId ? '跳到压缩所在轮次' : '日志未记录所属轮次'}><Minimize2 size={13} />{clock(marker.timestamp)} · 第 {marker.beforeRequestIndex} 条之后</button>)}</div></details>}
     <details className="token-timeline-note">

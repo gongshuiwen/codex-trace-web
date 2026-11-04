@@ -12,7 +12,6 @@ import './tool-content.css';
 
 type Tab = ToolViewState['tab'];
 const tabs = [{ id: 'result', label: '关键结果' }, { id: 'arguments', label: '调用参数' }, { id: 'raw', label: '原始返回' }] as const;
-const tabListeners = new Map<string, Set<() => void>>();
 const completedNavigations = new Map<string, true>();
 
 function completeNavigation(key: string) {
@@ -59,13 +58,6 @@ export function ToolContent({ tool, sessionId, revision, search, navigationId = 
   const actualHit = search?.field === 'arguments' ? tool.arguments.slice(search.offset, search.offset + search.length) : search && hitInWindow ? output.window.text.slice(search.offset - output.window.offset, search.offset - output.window.offset + search.length) : '';
   const hitValid = Boolean(search && search.length > 0 && hitInWindow && matchesSearchText(actualHit, search));
 
-  useEffect(() => {
-    const listeners = tabListeners.get(toolKey) ?? new Set<() => void>();
-    tabListeners.set(toolKey, listeners);
-    const update = () => setTab(toolViewState.get(sessionId, tool.id)?.tab ?? 'result');
-    listeners.add(update);
-    return () => { listeners.delete(update); if (!listeners.size) tabListeners.delete(toolKey); };
-  }, [toolKey, sessionId, tool.id]);
   useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
 
   function selectTab(next: Tab, manual = true) {
@@ -73,7 +65,6 @@ export function ToolContent({ tool, sessionId, revision, search, navigationId = 
       const previous = toolViewState.get(sessionId, tool.id);
       toolViewState.set(sessionId, tool.id, { open: previous?.open ?? tool.status === 'failed', tab: next });
       setTab(next); setCopied(false); setCopyError('');
-      for (const listener of tabListeners.get(toolKey) ?? []) listener();
     };
     if (manual && preserveLayout) preserveLayout(change); else change();
   }

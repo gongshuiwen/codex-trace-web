@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, AlertTriangle, ArrowDown, ArrowUpRight, Circle, Copy, Check, Minimize2 } from 'lucide-react';
-import type { SessionDetail, TimelineEvent, ToolSearchLocation, TurnDetail, TurnSummary } from '../shared/types';
+import type { SessionDetail, TimelineEvent, TurnDetail, TurnSummary } from '../shared/types';
 import { api, errorMessage, isAbort, sessionPath } from './api';
 import { Markdown } from './Markdown';
 import { CollaborationCard } from './CollaborationCard';
@@ -17,11 +17,6 @@ import { ContextEvents, EventDisclosure, FinalAnswer } from './TimelineEvents';
 import { buildTimelineCollaboration } from './collaboration-participants';
 import { groupReadingProcess, latestReadingCommentary, readingProcessHasTool, readingProcessStateKey, readingProcessSummary, readingProcessToolStates, type ReadingProcessGroup, type ReadingTimelineEntry } from './reading-mode';
 import './reading-mode.css';
-
-export interface Inspection {
-  turnId?: string; toolId?: string; requestId?: string; focus?: 'total' | 'requests' | 'cache' | 'latest'; search?: ToolSearchLocation; navigationId?: number;
-  searchNavigation?: { index: number; total: number; truncated: boolean; revision: string; onNavigate: (index: number) => void };
-}
 
 function ReadingProcess({ group, sessionId, turnId, target, preserveLayout, latestCommentary, showActivity, renderEntry, readingMode }: {
   group: ReadingProcessGroup; sessionId: string; turnId: string; target?: ToolNavigationTarget;
@@ -58,8 +53,8 @@ function ReadingProcess({ group, sessionId, turnId, target, preserveLayout, late
   </section>;
 }
 
-export function TurnCard({ turn, sessionId, session, revision, onInspect, targetTurn, onReady, toolTarget, compactionTarget, preserveLayout, onSearchReady, readingMode = false, onNavigateFinalAnswer }: {
-  turn: TurnSummary; sessionId: string; revision: string; onInspect: (selection: Inspection) => void; targetTurn: string | null; onReady?: (turnId: string) => void;
+export function TurnCard({ turn, sessionId, session, revision, onUsage, targetTurn, onReady, toolTarget, compactionTarget, preserveLayout, onSearchReady, readingMode = false, onNavigateFinalAnswer }: {
+  turn: TurnSummary; sessionId: string; revision: string; onUsage: (turnId: string) => void; targetTurn: string | null; onReady?: (turnId: string) => void;
   session?: SessionDetail;
   toolTarget?: ToolNavigationTarget | null; preserveLayout?: (change: () => void) => void; onSearchReady?: (version: number) => void;
   compactionTarget?: CompactionNavigationTarget | null;
@@ -116,7 +111,7 @@ export function TurnCard({ turn, sessionId, session, revision, onInspect, target
   const finalAnswer = detail?.events.findLast(event => event.kind === 'assistant');
   function renderEntry(entry: ReadingTimelineEntry) {
     return entry.kind === 'tool-group'
-      ? <ToolGroup key={`group-${entry.id}`} group={entry} turnId={turn.id} sessionId={sessionId} target={activeTarget} onInspect={onInspect} preserveLayout={preserveLayout} onSearchReady={toolReady} />
+      ? <ToolGroup key={`group-${entry.id}`} group={entry} turnId={turn.id} sessionId={sessionId} revision={revision} target={activeTarget} preserveLayout={preserveLayout} onSearchReady={toolReady} />
       : entry.kind === 'context-group' ? <ContextEvents key={`context-${entry.id}`} sessionId={sessionId} group={entry} preserveLayout={preserveLayout} />
       : entry.kind === 'tool' && entry.tool ? renderEvent(entry) : <div key={entry.id} data-event-id={entry.id} className={activeCompaction?.eventId === entry.id ? 'timeline-compaction-target' : undefined}>{renderEvent(entry)}</div>;
   }
@@ -131,6 +126,6 @@ export function TurnCard({ turn, sessionId, session, revision, onInspect, target
     <div className="turn-content min-h-5 min-[601px]:pl-[33px]">{error && <div className="inline-error" role="alert">{error}<button className="text-button" onClick={() => setRetry(value => value + 1)}>重试</button></div>}{!detail && !error && <div className="turn-loading"><span className="pulse" />正在读取这一轮…</div>}{detail?.warnings.map((warning, index) => <div className="timeline-notice" key={index}><AlertTriangle size={13} />{warning}</div>)}{targetMissing && <div className="timeline-notice" role="status">目标调用已不在当前日志中，请重新搜索。</div>}{compactionMissing && <div className="timeline-notice" role="status">目标压缩记录已不在当前日志中，请刷新压缩列表。</div>}{readingTimeline.map(entry => entry.kind === 'reading-process'
       ? <ReadingProcess key={`process-${entry.id}`} group={entry} sessionId={sessionId} turnId={turn.id} target={activeTarget} preserveLayout={preserveLayout} latestCommentary={latestCommentary?.groupId === entry.id ? latestCommentary.event : undefined} showActivity={turn.status === 'running' && !latestCommentary && lastProcess?.id === entry.id} renderEntry={renderEntry} readingMode={readingMode} />
       : renderEntry(entry))}{readingMode && detail && turn.status === 'running' && !lastProcess && <p className="reading-process-activity turn-reading-activity" role="status"><span className="pulse" />正在等待新的执行记录…</p>}</div>
-    <div className="turn-footer mt-5 flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-6 text-xs text-[var(--muted)] min-[601px]:pl-[33px] [&>button]:ml-auto [&>button]:inline-flex [&>button]:min-h-9 [&>button]:items-center [&>button]:gap-1 [&>button]:text-[var(--soft)] [&>button]:hover:text-[var(--accent)] max-[600px]:[&>button]:min-h-11"><span>{turn.toolCount} 次工具调用</span><span className="separator text-[var(--border)]">·</span><span>{tokens(turn.usage.tokens?.totalTokens)} tokens</span><span className="separator text-[var(--border)]">·</span><span>{turn.usage.completeness === 'partial' ? '至少 ' : ''}{turn.usage.requestCount} 次模型调用</span><button onClick={() => onInspect({ turnId: turn.id })}>统计与明细<ArrowUpRight size={13} /></button></div>
+    <div className="turn-footer mt-5 flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-6 text-xs text-[var(--muted)] min-[601px]:pl-[33px] [&>button]:ml-auto [&>button]:inline-flex [&>button]:min-h-9 [&>button]:items-center [&>button]:gap-1 [&>button]:text-[var(--soft)] [&>button]:hover:text-[var(--accent)] max-[600px]:[&>button]:min-h-11"><span>{turn.toolCount} 次工具调用</span><span className="separator text-[var(--border)]">·</span><span>{tokens(turn.usage.tokens?.totalTokens)} tokens</span><span className="separator text-[var(--border)]">·</span><span>{turn.usage.completeness === 'partial' ? '至少 ' : ''}{turn.usage.requestCount} 次模型调用</span><button onClick={() => onUsage(turn.id)}>查看本轮用量<ArrowUpRight size={13} /></button></div>
   </article>;
 }

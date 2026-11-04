@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { chooseReadingPosition, indexOffset, isReadingAtBottom, locateReadingPosition, readReadingPosition, restoreReadingPosition, saveReadingPosition, visibleReadingPosition, type ReadingPosition, type ReadingTarget } from './reading-position';
+import { historyReadingPosition, SAVE_READING_EVENT } from './session-location';
 
-export function useReadingPosition(sessionId: string, turnIds: string[], targetTurn: string | null, navigationVersion: number, virtuoso: React.RefObject<VirtuosoHandle | null>, target?: ReadingTarget | null) {
+export function useReadingPosition(sessionId: string, turnIds: string[], targetTurn: string | null, navigationVersion: number, virtuoso: React.RefObject<VirtuosoHandle | null>, target?: ReadingTarget | null, active = true) {
+  const historyKey = window.history.state?.sessionLensEntry;
+  const persistPosition = useCallback((position: ReadingPosition) => {
+    saveReadingPosition(sessionId, position);
+    if (window.history.state?.sessionLensEntry === historyKey) window.history.replaceState({ ...window.history.state, readingPosition: { sessionId, position } }, '', window.location.href);
+  }, [sessionId, historyKey]);
   const turns = useRef(turnIds); turns.current = turnIds;
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [currentTurnId, setCurrentTurnId] = useState<string | null>(null);
@@ -16,24 +22,27 @@ export function useReadingPosition(sessionId: string, turnIds: string[], targetT
   const followingBottom = useRef(false);
   const scrollerRef = useCallback((element: HTMLElement | null | Window) => setScroller(element instanceof HTMLElement ? element : null), []);
   const capture = useCallback(() => {
-    if (!scroller) return null;
+    if (!scroller || !active) return null;
     const position = visibleReadingPosition(scroller);
-    if (position) { anchor.current = position; setCurrentTurnId(previous => previous === position.turnId ? previous : position.turnId); }
+    if (position) {
+      anchor.current = position; setCurrentTurnId(previous => previous === position.turnId ? previous : position.turnId);
+      if (window.history.state?.sessionLensEntry === historyKey) window.history.replaceState({ ...window.history.state, readingPosition: { sessionId, position } }, '', window.location.href);
+    }
     followingBottom.current = isReadingAtBottom(scroller);
     return position;
-  }, [scroller]);
+  }, [scroller, active, historyKey, sessionId]);
   const cancelLayout = useCallback(() => {
     if (layoutFrame.current != null) cancelAnimationFrame(layoutFrame.current);
     layoutFrame.current = null;
     pendingLayout.current = null;
   }, []);
   const save = useCallback(() => {
-    if (!scroller || navigation.current || pendingLayout.current || suppressSave.current) return;
+    if (!scroller || !active || navigation.current || pendingLayout.current || suppressSave.current) return;
     const position = capture() ?? anchor.current;
-    if (position) saveReadingPosition(sessionId, position);
-  }, [scroller, sessionId, capture]);
+    if (position) persistPosition(position);
+  }, [scroller, active, persistPosition, capture]);
   const restoreLayout = useCallback(() => {
-    if (!scroller || navigation.current || Date.now() < manualUntil.current || layoutFrame.current != null) return;
+    if (!scroller || !active || navigation.current || Date.now() < manualUntil.current || layoutFrame.current != null) return;
     if (!pendingLayout.current && followingBottom.current) { capture(); return; }
     if (!pendingLayout.current && !anchor.current) { capture(); return; }
     layoutFrame.current = requestAnimationFrame(() => {
@@ -51,7 +60,7 @@ export function useReadingPosition(sessionId: string, turnIds: string[], targetT
             navigation.current = null; pendingLayout.current = null;
             if (!suppressSave.current) {
               const current = capture();
-              if (current) saveReadingPosition(sessionId, current);
+              if (current) persistPosition(current);
             }
           }, { initialScroll: false, mountOffset: 0 });
         return;
@@ -59,10 +68,10 @@ export function useReadingPosition(sessionId: string, turnIds: string[], targetT
       if (position && restoreReadingPosition(scroller, position)) {
         pendingLayout.current = null;
         const current = capture();
-        if (current) saveReadingPosition(sessionId, current);
+        if (current) persistPosition(current);
       }
     });
-  }, [scroller, sessionId, capture, virtuoso]);
+  }, [scroller, active, persistPosition, capture, virtuoso]);
   const cancelNavigation = useCallback(() => {
     navigationIntent.current++;
     manualUntil.current = Date.now() + 250;
@@ -76,14 +85,15 @@ export function useReadingPosition(sessionId: string, turnIds: string[], targetT
     const position = capture();
     pendingLayout.current = position;
     manualUntil.current = 0;
-    if (position) saveReadingPosition(sessionId, position);
+    if (position) persistPosition(position);
     try { change(); } finally { restoreLayout(); }
-  }, [cancelLayout, capture, restoreLayout, sessionId]);
+  }, [cancelLayout, capture, restoreLayout, persistPosition]);
 
   useLayoutEffect(() => {
-    if (!scroller) return;
+    if (!scroller || !active) return;
     suppressSave.current = false;
-    const position = chooseReadingPosition(turns.current, targetTurn, readReadingPosition(sessionId), target);
+    const historyPosition = historyReadingPosition(sessionId);
+    const position = chooseReadingPosition(turns.current, historyPosition ? null : targetTurn, historyPosition ?? readReadingPosition(sessionId), target);
     if (position) {
       const index = turns.current.indexOf(position.turnId);
       let cancelled = false;
@@ -94,7 +104,7 @@ export function useReadingPosition(sessionId: string, turnIds: string[], targetT
         cancelled = true; navigation.current = null;
         if (!suppressSave.current) {
           const current = capture();
-          if (current) saveReadingPosition(sessionId, current);
+          if (current) persistPosition(current);
         }
       });
     } else capture();
@@ -106,7 +116,7 @@ export function useReadingPosition(sessionId: string, turnIds: string[], targetT
       navigation.current?.cancel(); cancelLayout(); save();
     };
   // Target fields, rather than the object identity or session revision, describe an explicit navigation.
-  }, [sessionId, scroller, targetTurn, target?.turnId, target?.toolId, target?.eventId, target?.groupId, navigationVersion, virtuoso, save, capture, cancelLayout]);
+  }, [sessionId, scroller, active, historyKey, targetTurn, target?.turnId, target?.toolId, target?.eventId, target?.groupId, navigationVersion, virtuoso, save, capture, cancelLayout, persistPosition]);
 
   useEffect(() => {
     if (!scroller) return;
@@ -119,10 +129,11 @@ export function useReadingPosition(sessionId: string, turnIds: string[], targetT
     const onKey = (event: KeyboardEvent) => { if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) cancelNavigation(); };
     scroller.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('pagehide', save);
+    window.addEventListener(SAVE_READING_EVENT, save);
     for (const name of ['wheel', 'touchstart', 'pointerdown']) window.addEventListener(name, cancelNavigation, { capture: true, passive: true });
     window.addEventListener('keydown', onKey, true);
     return () => {
-      clearTimeout(timer); scroller.removeEventListener('scroll', onScroll); window.removeEventListener('pagehide', save);
+      clearTimeout(timer); scroller.removeEventListener('scroll', onScroll); window.removeEventListener('pagehide', save); window.removeEventListener(SAVE_READING_EVENT, save);
       for (const name of ['wheel', 'touchstart', 'pointerdown']) window.removeEventListener(name, cancelNavigation, true);
       window.removeEventListener('keydown', onKey, true); save();
     };
@@ -140,8 +151,8 @@ export function useReadingPosition(sessionId: string, turnIds: string[], targetT
     }, []),
     preserveLayout,
     followOutput: useCallback((atBottom: boolean) => {
-      followingBottom.current = !navigation.current && !pendingLayout.current && atBottom && !!scroller && isReadingAtBottom(scroller);
+      followingBottom.current = active && !navigation.current && !pendingLayout.current && atBottom && !!scroller && isReadingAtBottom(scroller);
       return followingBottom.current ? 'smooth' as const : false as const;
-    }, [scroller]),
+    }, [scroller, active]),
   };
 }

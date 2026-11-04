@@ -55,7 +55,7 @@ describe('reading mode turn rendering', () => {
   function render(sessionId: string, events: TimelineEvent[], options: { readingMode?: boolean; status?: TurnSummary['status']; target?: { toolId: string; kind: 'search' | 'failure' } } = {}) {
     const turn: TurnSummary = { id: 'turn', index: 0, prompt: 'USER_REQUEST', preview: '', startedAt: '2026-11-04T00:00:00Z', status: options.status ?? 'completed', model: 'test', toolCount: events.filter(entry => entry.kind === 'tool').length, usage, startOffset: 0, endOffset: 1 };
     turnDetailCache.put(sessionId, turn.id, 'revision', { summary: turn, events: [event('request', 'user', 'USER_REQUEST'), ...events], requests: [], warnings: [] });
-    return renderToStaticMarkup(createElement(TurnCard, { turn, sessionId, revision: 'revision', onInspect() {}, targetTurn: null, readingMode: options.readingMode, onNavigateFinalAnswer() {},
+    return renderToStaticMarkup(createElement(TurnCard, { turn, sessionId, revision: 'revision', onUsage() {}, targetTurn: null, readingMode: options.readingMode, onNavigateFinalAnswer() {},
       toolTarget: options.target && { turnId: turn.id, eventId: `event-${options.target.toolId}`, toolId: options.target.toolId, kind: options.target.kind, version: 1, reveal: true },
     }));
   }

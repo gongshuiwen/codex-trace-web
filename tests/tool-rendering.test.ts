@@ -21,18 +21,18 @@ function result(value: ToolCall, complete = true) {
 
 describe('tool result rendering', () => {
   it('distinguishes a returned result from an explicitly successful command', () => {
-    const render = (value: ToolCall) => renderToStaticMarkup(createElement(ToolCard, { tool: value, onInspect() {} }));
+    const render = (value: ToolCall) => renderToStaticMarkup(createElement(ToolCard, { tool: value, sessionId: 'rendering', revision: 'revision' }));
     expect(render(tool())).toContain('已返回');
     expect(render(tool({ exitCode: 0 }))).toContain('完成');
     expect(render(tool({ status: 'unknown' }))).toContain('结果未记录');
   });
 
-  it('keeps failed rows compact and reserves the compiler diagnostic for the detail content', () => {
+  it('keeps failed rows collapsed until their inline details are expanded', () => {
     const value = tool({ status: 'failed', exitCode: 2, output: 'client/ToolCard.tsx(18,7): error TS2322: Type mismatch.' });
-    const html = renderToStaticMarkup(createElement(ToolCard, { tool: value, onInspect() {} }));
+    const html = renderToStaticMarkup(createElement(ToolCard, { tool: value, sessionId: 'rendering', revision: 'revision' }));
     expect(html).toContain('失败');
     expect(html).toContain('退出码 2');
-    expect(html).not.toContain('aria-expanded=');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('role="tabpanel"');
     expect(html).not.toContain('error TS2322');
     expect(result(value)).toContain('检测到的诊断');
@@ -85,7 +85,7 @@ describe('unified compact tool groups', () => {
     return groupAdjacentTools(events)[0] as ToolGroupEntry;
   }
   function render(value: ToolGroupEntry, sessionId: string, target?: ToolNavigationTarget) {
-    return renderToStaticMarkup(createElement(ToolGroup, { group: value, turnId: 'turn', sessionId, target, onInspect() {} }));
+    return renderToStaticMarkup(createElement(ToolGroup, { group: value, turnId: 'turn', sessionId, revision: 'revision', target }));
   }
 
   it.each([1, 2])('uses the same collapsed group container for %s calls', count => {
@@ -120,8 +120,9 @@ describe('unified compact tool groups', () => {
     expect(html).toContain('1 结果未记录');
     expect(html).toContain('1 已返回');
     expect(html).toContain('TypeError: recorded failure');
-    expect(html).toContain('查看本组首条失败调用');
-    expect(html).toMatch(/<\/button><button[^>]*class="tool-group-failure-action"[^>]*aria-haspopup="dialog"/);
+    expect(html).toContain('展开本组首条失败调用');
+    expect(html).toMatch(/<\/button><button[^>]*class="tool-group-failure-action"/);
+    expect(html).not.toContain('aria-haspopup="dialog"');
     expect(html).not.toContain('成功');
     expect(html).not.toContain('class="tool-call-row"');
   });
@@ -133,7 +134,7 @@ describe('unified compact tool groups', () => {
     const html = render(group(values), sessionId);
     expect(html).toContain('aria-expanded="true"');
     expect(html.match(/class="tool-call-row"/g)).toHaveLength(count);
-    expect(html.match(/aria-expanded=/g)).toHaveLength(1);
+    expect(html.match(/aria-expanded=/g)).toHaveLength(count + 1);
     expect(html).not.toContain('RAW_ARGUMENT_BODY');
     expect(html).not.toContain('RAW_OUTPUT_BODY');
     expect(html).not.toContain('role="tabpanel"');
@@ -150,7 +151,7 @@ describe('unified compact tool groups', () => {
     expect(render(value, sessionId)).toContain('aria-expanded="false"');
   });
 
-  it.each(['search', 'failure'] as const)('reveals the %s target row over a saved collapse without opening inline details', kind => {
+  it.each(['search', 'failure'] as const)('reveals the %s target and its inline details over a saved collapse', kind => {
     const sessionId = `unified-target-${kind}`, value = group([tool({status: 'failed'})]);
     toolGroupViewState.setAll(sessionId, false);
     const html = render(value, sessionId, {
@@ -160,35 +161,35 @@ describe('unified compact tool groups', () => {
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain(`tool-${kind}-target`);
     expect(html).toContain('data-tool-id="example"');
-    expect(html).not.toContain('role="tabpanel"');
-    expect(html).not.toContain('<mark');
+    expect(html).toContain('role="tabpanel"');
+    if (kind === 'search') expect(html).toContain('>pnpm</mark>');
   });
 
-  it('renders an individual row as a detail action with no additional disclosure', () => {
-    const html = renderToStaticMarkup(createElement(ToolCard, {tool: tool({arguments: '{"title":"检查紧凑调用","cmd":"pnpm typecheck"}', status: 'failed'}), eventId: 'row-event', onInspect() {}}));
+  it('renders an individual row as a collapsed inline disclosure', () => {
+    const html = renderToStaticMarkup(createElement(ToolCard, {tool: tool({arguments: '{"title":"检查紧凑调用","cmd":"pnpm typecheck"}', status: 'failed'}), eventId: 'row-event', sessionId: 'row', revision: 'revision'}));
     expect(html).toContain('检查紧凑调用');
     expect(html).toContain('pnpm typecheck');
     expect(html).toContain('失败');
-    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).not.toContain('aria-haspopup="dialog"');
     expect(html).toContain('data-event-id="row-event"');
-    expect(html).not.toContain('aria-expanded=');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('role="tabpanel"');
   });
 });
 
-describe('separate tool detail content', () => {
+describe('inline tool detail content', () => {
   it('keeps the saved detail tab when group expansion changes', () => {
     const sessionId = 'detail-tab-independent', value = tool();
     toolViewState.set(sessionId, value.id, {open: true, tab: 'arguments'});
     toolGroupViewState.setAll(sessionId, true); toolGroupViewState.setAll(sessionId, false);
-    const html = renderToStaticMarkup(createElement(ToolContent, {tool: value, sessionId, revision: 'revision', mode: 'detail'}));
+    const html = renderToStaticMarkup(createElement(ToolContent, {tool: value, sessionId, revision: 'revision'}));
     expect(html).toMatch(/<button[^>]*role="tab"[^>]*aria-selected="true"[^>]*>调用参数<\/button>/);
     expect(html).toContain('pnpm typecheck');
   });
 
   it('selects the matching detail tab and marks the exact argument location for search', () => {
     const html = renderToStaticMarkup(createElement(ToolContent, {
-      tool: tool(), sessionId: 'detail-search', revision: 'revision', mode: 'detail', navigationId: 9002,
+      tool: tool(), sessionId: 'detail-search', revision: 'revision', navigationId: 9002,
       search: {field: 'arguments', offset: 8, length: 4, query: 'pnpm', matchedText: 'pnpm'},
     }));
     expect(html).toMatch(/<button[^>]*role="tab"[^>]*aria-selected="true"[^>]*>调用参数<\/button>/);

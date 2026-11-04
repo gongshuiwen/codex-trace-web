@@ -1,0 +1,52 @@
+.usage-analysis { max-width:1100px; margin-inline:auto; color:var(--text); }
+.usage-analysis h2 { margin:0 0 20px; font-size:16px; font-weight:600; line-height:24px; }
+.usage-analysis .usage-overview { scroll-margin-top:24px; }
+.usage-analysis .usage-block { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); column-gap:48px; padding:0 0 28px; }
+.usage-analysis .detail-section-heading { grid-column:1/-1; font-size:16px; color:var(--text); }
+.usage-analysis .usage-total { grid-column:1; grid-row:2; align-self:center; }
+.usage-analysis .usage-grid { grid-column:2; grid-row:2; }
+.usage-analysis .cache-track,.usage-analysis .cache-caption { grid-column:1/-1; }
+.usage-analysis .usage-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; grid-column:1/-1; }
+.usage-analysis .usage-facts > div { display:block; margin:0; }
+.usage-analysis .usage-facts dd { margin-top:4px; text-align:left; }
+.usage-trend,.usage-calls { margin-top:28px; scroll-margin-top:24px; }
+.usage-calls { padding-top:28px; border-top:1px solid var(--border); }
+.usage-calls-heading,.usage-request-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px 20px; }
+.usage-calls-heading { justify-content:space-between; margin-bottom:16px; }
+.usage-calls-heading h2 { margin:0; }
+.usage-analysis button:not(.token-icon-button):not(.token-metric-control) { cursor:pointer; }
+.usage-calls-heading > button,.usage-request-heading > button { min-height:32px; padding:4px 0; border:0; background:transparent; color:var(--accent-strong); font-size:12px; }
+.usage-request-picker { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; color:var(--muted); font-size:12px; }
+.usage-request-picker select { min-height:36px; min-width:0; max-width:100%; padding:6px 32px 6px 10px; border:1px solid var(--control); border-radius:4px; background:var(--panel); color:var(--text); font-size:12px; }
+.usage-request-heading { margin-top:20px; }
+.usage-call-navigation { display:flex; align-items:center; gap:16px; margin-top:12px; color:var(--muted); font-size:12px; }
+.usage-call-navigation > button { min-height:36px; padding:4px 0; border:0; background:transparent; color:var(--soft); }
+.usage-call-navigation > button:disabled { opacity:.4; cursor:default; }
+.usage-request-heading h3 { margin:0; font-size:14px; font-weight:600; }
+.usage-request-heading > span { color:var(--muted); font-size:12px; }
+.usage-request-heading > button { margin-left:auto; }
+.request-usage-values { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:20px 28px; margin:20px 0 28px; font-variant-numeric:tabular-nums; }
+.request-usage-values dt { color:var(--muted); font-size:12px; line-height:20px; }
+.request-usage-values dd { margin:5px 0 0; font-size:14px; overflow-wrap:anywhere; }
+.request-context-details > summary,.usage-method > summary { display:flex; align-items:center; min-height:40px; cursor:pointer; color:var(--soft); font-size:13px; }
+.request-context-details .context-analysis { margin-top:0; }
+.usage-method { margin-top:28px; padding-top:12px; border-top:1px solid var(--border); color:var(--muted); font-size:12px; line-height:1.8; }
+.usage-method p { max-width:80ch; margin:10px 0; }
+.usage-method dl { margin-top:16px; }
+.usage-method dd { margin:2px 0 12px; color:var(--soft); overflow-wrap:anywhere; }
+.usage-notice { padding:12px; border-left:2px solid var(--warning); background:var(--bg); color:var(--soft); font-size:12px; line-height:1.8; overflow-wrap:anywhere; }
+.usage-analysis :is(button,select,summary):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+@container session (max-width:760px) {
+  .usage-analysis .usage-block { column-gap:24px; }
+  .request-usage-values { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+}
+@container session (max-width:600px) {
+  .usage-analysis .usage-block { column-gap:16px; }
+  .usage-analysis .usage-total { font-size:20px; }
+  .usage-analysis .usage-grid { gap:12px; }
+  .usage-analysis .usage-facts { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .usage-request-picker { display:grid; gap:6px; }
+  .usage-request-picker select { width:100%; min-height:44px; }
+  .usage-request-heading > button { margin-left:0; }
+  .usage-calls-heading > button,.usage-request-heading > button,.usage-call-navigation > button,.request-context-details > summary,.usage-method > summary { min-height:44px; }
+}

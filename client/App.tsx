@@ -5,7 +5,8 @@ import type { CompactionItem, IndexProgress, LiveEvent, SessionDetail, SessionLi
 import { api, errorMessage, isAbort, sessionPath } from './api';
 import { Sidebar } from './Sidebar';
 import { SessionStats, type UsageMetric } from './Stats';
-import { TurnCard, type Inspection } from './TurnCard';
+import { TurnCard } from './TurnCard';
+import { navigateSessionLocation, readSessionLocation, type SessionLocation, type SessionView } from './session-location';
 import { sessionDisplayName, sessionTooltip, statusLabels } from './format';
 import { useReadingPosition } from './useReadingPosition';
 import { READING_BOTTOM_TOLERANCE } from './reading-position';
@@ -17,37 +18,18 @@ import { TurnDirectory } from './TurnDirectory';
 import './session-header.css';
 import './tool-search.css';
 
-const DetailDrawer = lazy(() => import('./DetailDrawer').then(module => ({ default: module.DetailDrawer })));
 const SettingsModal = lazy(() => import('./SettingsModal').then(module => ({ default: module.SettingsModal })));
 const SessionOverview = lazy(() => import('./SessionOverview'));
 
-function readLocation() {
-  const params = new URLSearchParams(window.location.search);
-  return { session: params.get('session'), turn: params.get('turn') };
-}
-
 type Theme = 'system' | 'dark' | 'light';
-type SessionView = 'conversation' | 'tokens' | 'collaboration';
 type ConversationMode = 'reading' | 'full';
 
 function initialConversationMode(): ConversationMode {
   try { return localStorage.getItem('session-lens-conversation-mode') === 'full' ? 'full' : 'reading'; } catch { return 'reading'; }
 }
 
-function readSessionView(): SessionView {
-  const value = window.history.state?.sessionView;
-  return value === 'tokens' || value === 'collaboration' ? value : 'conversation';
-}
-
 function initialTheme(): Theme {
   try { const value = localStorage.getItem('session-lens-theme'); return value === 'dark' || value === 'light' ? value : 'system'; } catch { return 'system'; }
-}
-
-function writeLocation(session: string, turn?: string, replace = false) {
-  const url = new URL(window.location.href);
-  url.searchParams.set('session', session);
-  turn ? url.searchParams.set('turn', turn) : url.searchParams.delete('turn');
-  window.history[replace ? 'replaceState' : 'pushState']({}, '', url);
 }
 
 function mergeSessionPages(previous: SessionList | null, page: SessionList): SessionList {
@@ -70,7 +52,7 @@ function toolSearchPreview(match: ToolSearchMatch) {
 }
 
 export function App() {
-  const [location, setLocation] = useState(readLocation);
+  const [location, setLocation] = useState(readSessionLocation);
   const [navigationVersion, setNavigationVersion] = useState(0);
   const [sessions, setSessions] = useState<SessionList | null>(null);
   const [listLoading, setListLoading] = useState(true);
@@ -83,7 +65,6 @@ export function App() {
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [sessionError, setSessionError] = useState('');
   const [sessionLoading, setSessionLoading] = useState(false);
-  const [inspection, setInspection] = useState<Inspection | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 900);
@@ -112,7 +93,7 @@ export function App() {
     return () => media.removeEventListener('change', foldNavigation);
   }, []);
   useEffect(() => {
-    const handler = () => { setLocation(readLocation()); setNavigationVersion(value => value + 1); setInspection(null); };
+    const handler = () => { setLocation(readSessionLocation()); setNavigationVersion(value => value + 1); };
     window.addEventListener('popstate', handler); return () => window.removeEventListener('popstate', handler);
   }, []);
 
@@ -139,7 +120,8 @@ export function App() {
       listKeyRef.current = listKey;
       setSessions(previous => cursor ? mergeSessionPages(previous, value) : value);
       if (!locationRef.current.session && value.items[0]) {
-        writeLocation(value.items[0].id, undefined, true); setLocation({ session: value.items[0].id, turn: null });
+        const next: SessionLocation = { session: value.items[0].id, turn: null, view: 'conversation', request: null, usageTurn: null, focus: null };
+        navigateSessionLocation(next, true); setLocation(next);
       }
     } catch (cause) { if (!isAbort(cause) && generation === listGeneration.current) setListError(errorMessage(cause)); }
     finally { if (generation === listGeneration.current) setListLoading(false); }
@@ -179,28 +161,31 @@ export function App() {
     return () => { source.close(); clearTimeout(sessionTimer); clearTimeout(listTimer); };
   }, [location.session]);
 
-  const selectSession = useCallback((value: SessionSummary) => {
-    writeLocation(value.id, value.match?.turnId); setLocation({ session: value.id, turn: value.match?.turnId ?? null }); setInspection(null);
+  const navigate = useCallback((next: SessionLocation, replace = false, resetReading = false) => {
+    navigateSessionLocation(next, replace, resetReading); setLocation(next);
     setNavigationVersion(version => version + 1);
-    if (window.innerWidth <= 900) setSidebarOpen(false);
   }, []);
+  const selectSession = useCallback((value: SessionSummary) => {
+    const next: SessionLocation = { session: value.id, turn: value.match?.turnId ?? null, view: 'conversation', request: null, usageTurn: null, focus: null };
+    navigate(next);
+    if (window.innerWidth <= 900) setSidebarOpen(false);
+  }, [navigate]);
   const navigateTurn = useCallback((turnId: string) => {
     const sessionId = locationRef.current.session;
     if (!sessionId) return;
-    writeLocation(sessionId, turnId); setLocation({ session: sessionId, turn: turnId });
-    setNavigationVersion(version => version + 1); setInspection(null);
-  }, []);
+    navigate({ ...locationRef.current, turn: turnId, view: 'conversation' }, false, true);
+  }, [navigate]);
 
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) return;
-      if (event.key === 'Escape') { setShowSettings(false); setShowShortcuts(false); setInspection(null); if (window.innerWidth <= 900) setSidebarOpen(false); return; }
+      if (event.key === 'Escape') { setShowSettings(false); setShowShortcuts(false); if (window.innerWidth <= 900) setSidebarOpen(false); return; }
       const target = event.target as HTMLElement | null;
       if (showSettings || target?.closest('[role="dialog"],input,textarea,select,[contenteditable="true"]')) return;
-      if (event.key === ',' && !inspection) { event.preventDefault(); setShowSettings(true); }
+      if (event.key === ',') { event.preventDefault(); setShowSettings(true); }
       if (event.key === '?') { event.preventDefault(); setShowShortcuts(value => !value); }
       if (event.key === '/') { event.preventDefault(); setSidebarOpen(true); requestAnimationFrame(() => document.getElementById('session-search')?.focus()); }
-      if ((event.key === 'j' || event.key === 'k') && !inspection && !showSettings) {
+      if ((event.key === 'j' || event.key === 'k') && !showSettings) {
         const list = listStateRef.current?.items ?? [];
         const index = list.findIndex(item => item.id === locationRef.current.session);
         const next = list[index + (event.key === 'j' ? 1 : -1)];
@@ -208,7 +193,7 @@ export function App() {
       }
     }
     window.addEventListener('keydown', keyboard); return () => window.removeEventListener('keydown', keyboard);
-  }, [inspection, showSettings, selectSession]);
+  }, [showSettings, selectSession]);
   const activeSession = session?.session.id === location.session ? session : null;
   const ThemeIcon = theme === 'system' ? Monitor : theme === 'dark' ? Moon : Sun;
   return <div className="app-shell flex h-dvh overflow-hidden bg-[var(--bg)]">
@@ -219,19 +204,16 @@ export function App() {
       {sessionError && activeSession && <div className="session-refresh-error" role="alert"><span>刷新失败，仍显示已加载内容。{sessionError}</span><button type="button" className="text-button" onClick={() => setSessionVersion(value => value + 1)}>重试刷新</button></div>}
       {!sessionError && !activeSession && (sessionLoading || listLoading) && <div className="welcome-state flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center text-sm leading-7 text-[var(--muted)] [&>h1]:text-2xl [&>h1]:font-semibold [&>h1]:text-[var(--text)] [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:text-[var(--text)] [&>svg]:text-[var(--accent)]"><LoaderCircle size={28} className="spin" /><h2>正在读取本地会话</h2><p>先载入摘要，详细内容按需读取。</p></div>}
       {!sessionError && !activeSession && !sessionLoading && !listLoading && <div className="welcome-state flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center text-sm leading-7 text-[var(--muted)] [&>h1]:text-2xl [&>h1]:font-semibold [&>h1]:text-[var(--text)] [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:text-[var(--text)] [&>svg]:text-[var(--accent)]"><Layers3 size={32} /><h1>会话观察台</h1><p>浏览本地 Codex 会话、工具调用与 Token 用量。<br />选择一个会话开始阅读，或设置日志目录。</p><button className="primary-button" onClick={() => setShowSettings(true)}><FolderOpen size={16} />选择日志目录</button></div>}
-      {activeSession && <SessionWorkspace key={activeSession.session.id} session={activeSession} reloadVersion={sessionVersion} targetTurn={location.turn} navigationVersion={navigationVersion} onInspect={setInspection} onSelectSession={selectSession} onTargetTurn={navigateTurn} />}
+      {activeSession && <SessionWorkspace key={activeSession.session.id} session={activeSession} reloadVersion={sessionVersion} location={location} onNavigate={navigate} navigationVersion={navigationVersion} onSelectSession={selectSession} onTargetTurn={navigateTurn} />}
       <footer className="statusbar flex h-7 shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--panel)] px-[var(--canvas-pad)] text-xs text-[var(--muted)] [&>span]:flex [&>span]:items-center [&>span]:gap-1.5"><span><Check size={12} />本地日志 · 只读</span><span className="statusbar-right ml-auto">Session Lens<span className="version ml-1 font-mono text-[11px]">v0.1</span></span></footer>
     </main>
-    {inspection && activeSession && <Suspense fallback={null}><DetailDrawer session={activeSession} selection={inspection} onClose={() => {
-      setInspection(null);
-      if (inspection.searchNavigation) requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('#tool-search-panel [aria-current="true"]')?.focus({ preventScroll: true }));
-    }} onNavigateTurn={navigateTurn} /></Suspense>}
-    {showSettings && <Suspense fallback={null}><SettingsModal onClose={() => setShowSettings(false)} onSaved={() => { setSessions(null); setSession(null); setLocation({ session: null, turn: null }); const url = new URL(window.location.href); url.searchParams.delete('session'); url.searchParams.delete('turn'); window.history.replaceState({}, '', url); setListVersion(value => value + 1); }} /></Suspense>}
+    {showSettings && <Suspense fallback={null}><SettingsModal onClose={() => setShowSettings(false)} onSaved={() => { setSessions(null); setSession(null); navigate({ session: null, turn: null, view: 'conversation', request: null, usageTurn: null, focus: null }, true); setListVersion(value => value + 1); }} /></Suspense>}
     {showShortcuts && <div className="shortcut-popover absolute right-5 top-14 z-50 w-64 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-lg [&>div]:flex [&>div]:items-center [&>div]:justify-between [&>p]:mt-3 [&>p]:flex [&>p]:justify-between [&>p]:text-xs [&>p]:text-[var(--muted)]"><div><strong>键盘快捷键</strong><button className="icon-button" onClick={() => setShowShortcuts(false)} aria-label="关闭快捷键"><X size={14} /></button></div><p><span>搜索会话</span><kbd>/</kbd></p><p><span>上 / 下一个会话</span><span><kbd>k</kbd> <kbd>j</kbd></span></p><p><span>打开设置</span><kbd>,</kbd></p><p><span>关闭面板</span><kbd>Esc</kbd></p><p><span>显示快捷键</span><kbd>?</kbd></p></div>}
   </div>;
 }
 
-function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersion, onInspect, onSelectSession, onTargetTurn }: { session: SessionDetail; reloadVersion: number; targetTurn: string | null; navigationVersion: number; onInspect: (selection: Inspection) => void; onSelectSession: (session: SessionSummary) => void; onTargetTurn: (id: string) => void }) {
+function SessionWorkspace({ session, reloadVersion, location, onNavigate, navigationVersion, onSelectSession, onTargetTurn }: { session: SessionDetail; reloadVersion: number; location: SessionLocation; onNavigate: (next: SessionLocation, replace?: boolean) => void; navigationVersion: number; onSelectSession: (session: SessionSummary) => void; onTargetTurn: (id: string) => void }) {
+  const { view, turn: targetTurn } = location;
   const virtuoso = useRef<VirtuosoHandle>(null);
   const atBottom = useRef(true);
   const [newContent, setNewContent] = useState(false);
@@ -240,10 +222,11 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
   const [conversationMode, setConversationMode] = useState(initialConversationMode);
   const [showTurnDirectory, setShowTurnDirectory] = useState(false);
   const [answerTarget, setAnswerTarget] = useState<{ turnId: string; eventId: string; version: number } | null>(null);
-  const [view, setViewState] = useState<SessionView>(readSessionView);
+  const [overviewOpened, setOverviewOpened] = useState(view !== 'conversation');
   const setView = (next: SessionView) => {
-    setViewState(next);
-    window.history.replaceState({ ...window.history.state, sessionView: next }, '', window.location.href);
+    if (next === view) return;
+    setToolTarget(null); setCompactionTarget(null); setAnswerTarget(null);
+    onNavigate({ ...location, view: next });
   };
   const [toolQuery, setToolQuery] = useState('');
   const [matches, setMatches] = useState<ToolSearchMatch[] | null>(null);
@@ -264,7 +247,7 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
   const searchResults = useRef<HTMLDivElement>(null);
   const searchComposing = useRef(false);
   const reading = useReadingPosition(session.session.id, session.turns.map(turn => turn.id), targetTurn, navigationVersion, virtuoso,
-    answerTarget ?? compactionTarget ?? (toolTarget ? { turnId: toolTarget.turnId, toolId: toolTarget.toolId, eventId: toolTarget.eventId } : null));
+    answerTarget ?? compactionTarget ?? (toolTarget ? { turnId: toolTarget.turnId, toolId: toolTarget.toolId, eventId: toolTarget.eventId } : null), view === 'conversation');
   const preserveToolLayout = useCallback((change: () => void) => {
     setToolTarget(previous => previous?.reveal ? { ...previous, reveal: false } : previous);
     reading.preserveLayout(change);
@@ -280,7 +263,8 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
       previousRevision.current = session.session.revision;
     }
   }, [session.session.revision]);
-  useEffect(() => { if (targetTurn) atBottom.current = false; setViewState(readSessionView()); }, [targetTurn, navigationVersion]);
+  useEffect(() => { if (targetTurn) atBottom.current = false; }, [targetTurn]);
+  useEffect(() => { if (view !== 'conversation') setOverviewOpened(true); }, [view]);
   useEffect(() => () => searchController.current?.abort(), []);
   useEffect(() => {
     try { localStorage.setItem('session-lens-conversation-mode', conversationMode); } catch { /* Display preferences must not interrupt reading. */ }
@@ -333,12 +317,15 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
     if (direction && canNavigateSearch) { event.preventDefault(); event.stopPropagation(); navigateToMatch(activeMatchIndex < 0 ? direction < 0 ? matches!.length - 1 : 0 : activeMatchIndex + direction); }
   }
   const value = session.session;
-  const navigateToTurn = (turnId: string) => { reading.cancelNavigation(); setToolTarget(null); setCompactionTarget(null); setAnswerTarget(null); setView('conversation'); onTargetTurn(turnId); };
+  const navigateToTurn = (turnId: string) => {
+    reading.cancelNavigation(); setToolTarget(null); setCompactionTarget(null); setAnswerTarget(null);
+    onTargetTurn(turnId);
+  };
   function navigateToAnswer(turnId: string, eventId: string) {
     reading.cancelNavigation(); searchNavigationRequested.current = true;
     setToolTarget(null); setCompactionTarget(null);
     setAnswerTarget({ turnId, eventId, version: nextToolNavigationId() });
-    setView('conversation'); onTargetTurn(turnId);
+    onTargetTurn(turnId);
   }
   function changeConversationMode(mode: ConversationMode) {
     if (mode !== conversationMode) reading.preserveLayout(() => setConversationMode(mode));
@@ -351,21 +338,19 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
     setCompactionTarget(null); setAnswerTarget(null);
     const target = toolSearchTarget(match, matchQuery, nextToolNavigationId());
     setToolTarget(target);
-    setView('conversation'); onTargetTurn(match.turnId);
-    onInspect({ turnId: match.turnId, toolId: match.toolId, search: target.location, navigationId: target.version,
-      searchNavigation: { index, total: matches!.length, truncated: searchTruncated, revision: matchRevision, onNavigate: navigateToMatch } });
+    onTargetTurn(match.turnId);
   }
   function navigateToFailure(failure: ToolFailureItem) {
     reading.cancelNavigation(); searchNavigationRequested.current = true;
     setCompactionTarget(null); setAnswerTarget(null);
     toolViewState.set(session.session.id, failure.toolId, { open: true, tab: 'result' });
     setToolTarget(toolFailureTarget(failure, nextToolNavigationId()));
-    setView('conversation'); onTargetTurn(failure.turnId);
+    onTargetTurn(failure.turnId);
   }
   function navigateToCompaction(record: CompactionItem) {
     reading.cancelNavigation(); searchNavigationRequested.current = true;
     setToolTarget(null); setAnswerTarget(null); setCompactionTarget({ ...record, version: nextToolNavigationId() });
-    setView('conversation'); onTargetTurn(record.turnId);
+    onTargetTurn(record.turnId);
   }
   function setAllToolsOpen(open: boolean) {
     reading.cancelNavigation();
@@ -383,12 +368,12 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
   const inspectUsage = (metric: UsageMetric) => {
     reading.cancelNavigation();
     if (metric === 'failures' || metric === 'compactions') {
-      setView('conversation');
+      if (view !== 'conversation') setView('conversation');
       reading.preserveLayout(() => { setRecordNavigator(metric); setRecordRequestId(value => value + 1); });
       return;
     }
-    if (metric === 'requests') { setView('tokens'); return; }
-    onInspect({ focus: metric });
+    if (metric === 'requests') { onNavigate({ ...location, view: 'usage', focus: 'requests' }); return; }
+    onNavigate({ ...location, view: 'usage', focus: metric, ...(metric === 'latest' ? { request: null, usageTurn: null } : {}) });
   };
   return <div className="session-workspace flex min-h-0 flex-1 flex-col" data-conversation-mode={conversationMode}>
     <header className="session-header shrink-0 bg-[var(--panel)] px-[var(--canvas-pad)] pb-3 pt-4 max-[600px]:pb-2 max-[600px]:pt-3">
@@ -399,7 +384,7 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
       <SessionStats usage={value.usage} toolCount={value.toolCount} toolFailureCount={value.toolFailureCount} durationMs={value.durationMs} compactionCount={value.compactionCount} onDetails={inspectUsage} />
     </header>
     <div className="timeline-toolbar flex min-h-11 shrink-0 items-center justify-between gap-3 border-y border-[var(--border)] bg-[var(--panel)] px-[var(--canvas-pad)]">
-      <div className="timeline-view-buttons flex items-center gap-2" aria-label="会话视图">{([['conversation', '对话'], ['tokens', 'Token 与压缩'], ['collaboration', '子代理协作']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={view === id} onClick={() => { reading.cancelNavigation(); setView(id); }}>{label}</button>)}</div>
+      <div className="timeline-view-buttons flex items-center gap-2" aria-label="会话视图">{([['conversation', '对话'], ['usage', '用量分析'], ['collaboration', '子代理协作']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={view === id} onClick={() => { reading.cancelNavigation(); setView(id); }}>{label}</button>)}</div>
       {view === 'conversation' && <div className="timeline-tool-actions">
         <div className="conversation-mode-desktop">{modeControl}</div>
         <button type="button" className="turn-directory-trigger icon-button" title="轮次目录" aria-label="轮次目录" aria-haspopup="dialog" aria-expanded={showTurnDirectory} aria-controls="turn-directory-dialog" onClick={() => setShowTurnDirectory(true)}><ListOrdered size={17} /></button>
@@ -445,10 +430,14 @@ function SessionWorkspace({ session, reloadVersion, targetTurn, navigationVersio
         ? <ToolFailureNavigator sessionId={value.id} revision={value.revision} requestId={recordRequestId} active={view === 'conversation'} turnIds={session.turns.map(turn => turn.id)} captureNavigationIntent={reading.captureNavigationIntent} onSelect={navigateToFailure} onClose={() => reading.preserveLayout(() => setRecordNavigator(null))} />
         : <CompactionNavigator sessionId={value.id} revision={value.revision} requestId={recordRequestId} active={view === 'conversation'} turnIds={session.turns.map(turn => turn.id)} captureNavigationIntent={reading.captureNavigationIntent} onSelect={navigateToCompaction} onClose={() => reading.preserveLayout(() => setRecordNavigator(null))} />}
     </div>}
-    <div className="workspace-content relative min-h-0 flex-1">
-    {view !== 'conversation' && <Suspense fallback={<div className="turn-loading">正在打开会话视图…</div>}><SessionOverview session={session} view={view} onInspect={onInspect} onSelectSession={onSelectSession} onNavigateTurn={navigateToTurn} /></Suspense>}
+    <div className="workspace-content relative min-h-0 flex-1" onKeyDown={event => {
+      if (view === 'conversation' && event.altKey && !event.ctrlKey && !event.metaKey && !event.nativeEvent.isComposing && canNavigateSearch && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault(); navigateToMatch(activeMatchIndex + (event.key === 'ArrowUp' ? -1 : 1));
+      }
+    }}>
+    {(overviewOpened || view !== 'conversation') && <Suspense fallback={view !== 'conversation' ? <div className="turn-loading">正在打开会话视图…</div> : null}><SessionOverview session={session} location={location} onNavigate={onNavigate} onSelectSession={onSelectSession} onNavigateTurn={navigateToTurn} /></Suspense>}
     <div className="timeline-viewport absolute inset-0 min-h-0" aria-hidden={view !== 'conversation'} style={view === 'conversation' ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}>
-      {session.turns.length === 0 ? <div className="timeline-empty flex h-full min-h-40 flex-col items-center justify-center gap-3 text-sm text-[var(--muted)]"><Layers3 size={24} /><p>会话已载入，还没有可展示的轮次。</p></div> : <Virtuoso ref={virtuoso} className="turn-virtuoso h-full [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent]" data={session.turns} computeItemKey={(_, turn) => turn.id} scrollerRef={reading.scrollerRef} totalListHeightChanged={reading.onLayoutChanged} rangeChanged={reading.onLayoutChanged} increaseViewportBy={600} followOutput={reading.followOutput} atBottomThreshold={READING_BOTTOM_TOLERANCE} atBottomStateChange={value => { atBottom.current = value; if (value) setNewContent(false); }} itemContent={(_, turn) => <TurnCard turn={turn} sessionId={value.id} session={session} revision={`${value.revision}:${reloadVersion}`} targetTurn={targetTurn} toolTarget={toolTarget} compactionTarget={compactionTarget} readingMode={conversationMode === 'reading'} onNavigateFinalAnswer={eventId => navigateToAnswer(turn.id, eventId)} preserveLayout={preserveToolLayout} onSearchReady={searchReady} onInspect={onInspect} onReady={reading.onTurnReady} />} />}
+      {session.turns.length === 0 ? <div className="timeline-empty flex h-full min-h-40 flex-col items-center justify-center gap-3 text-sm text-[var(--muted)]"><Layers3 size={24} /><p>会话已载入，还没有可展示的轮次。</p></div> : <Virtuoso ref={virtuoso} className="turn-virtuoso h-full [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent]" data={session.turns} computeItemKey={(_, turn) => turn.id} scrollerRef={reading.scrollerRef} totalListHeightChanged={reading.onLayoutChanged} rangeChanged={reading.onLayoutChanged} increaseViewportBy={600} followOutput={reading.followOutput} atBottomThreshold={READING_BOTTOM_TOLERANCE} atBottomStateChange={value => { atBottom.current = value; if (value) setNewContent(false); }} itemContent={(_, turn) => <TurnCard turn={turn} sessionId={value.id} session={session} revision={`${value.revision}:${reloadVersion}`} targetTurn={targetTurn} toolTarget={toolTarget} compactionTarget={compactionTarget} readingMode={conversationMode === 'reading'} onNavigateFinalAnswer={eventId => navigateToAnswer(turn.id, eventId)} preserveLayout={preserveToolLayout} onSearchReady={searchReady} onUsage={turnId => onNavigate({ ...location, view: 'usage', usageTurn: turnId, request: null, focus: 'calls' })} onReady={reading.onTurnReady} />} />}
       {newContent && <button className="new-content-button absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-[var(--primary)] px-4 py-2.5 text-xs text-[var(--on-primary)] shadow-lg" onClick={() => { reading.cancelNavigation(); virtuoso.current?.scrollToIndex({ index: session.turns.length - 1, align: 'end', behavior: 'smooth' }); setNewContent(false); }}><ArrowDown size={14} />有新内容，跳到最新</button>}
     </div>
     </div>

@@ -26,8 +26,6 @@
 .tool-search-result-content>strong { font-weight:500; color:var(--soft); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .tool-search-result-content>span { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; color:var(--muted); line-height:1.6; overflow-wrap:anywhere; }
 .tool-search-result-content mark { border-radius:2px; background:var(--accent-light); color:var(--text); font-weight:600; text-decoration:underline; text-decoration-color:var(--accent); text-underline-offset:2px; }
-.tool-search-drawer-navigation { display:flex; flex:none; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 12px; padding:8px 24px; border-bottom:1px solid var(--border); color:var(--muted); font-size:12px; }
-.tool-search-drawer-navigation>span { font-variant-numeric:tabular-nums; }
 @media(max-width:600px) {
   .tool-search-panel { max-height:42dvh; }
   .tool-search-feedback { flex-wrap:wrap; gap:4px; }
@@ -36,5 +34,4 @@
   .tool-search-results-list>button { flex-wrap:wrap; gap:5px 10px; }
   .tool-search-result-meta { order:-1; width:100%; }
   .tool-search-result-content { width:calc(100% - 28px); }
-  .tool-search-drawer-navigation { padding:6px 20px; }
 }

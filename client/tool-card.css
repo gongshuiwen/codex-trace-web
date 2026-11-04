@@ -1,5 +1,10 @@
 .tool-summary-card { min-width:0; margin:10px 0; overflow:hidden; border:1px solid var(--border); border-radius:8px; background:var(--panel); }
 .tool-call-icon { color:var(--muted); }
+.tool-call-row[aria-expanded="true"] .tool-row-detail-icon { transform:rotate(180deg); }
+.tool-call-info { padding:0 14px; border-top:1px solid var(--border); color:var(--muted); font-size:12px; line-height:1.8; }
+.tool-call-info > summary { display:flex; align-items:center; min-height:40px; cursor:pointer; }
+.tool-call-info dl { margin:0 0 12px; }
+.tool-call-info dd { margin:2px 0 8px; color:var(--soft); overflow-wrap:anywhere; }
 .tool-call-label { display:grid; gap:3px; min-width:0; }
 .tool-call-title { font-size:14px; font-weight:500; line-height:1.5; color:var(--text); overflow-wrap:anywhere; }
 .tool-call-subtitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; line-height:1.5; color:var(--muted); }

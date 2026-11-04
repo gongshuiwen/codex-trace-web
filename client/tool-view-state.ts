@@ -41,6 +41,8 @@ function safeSessionStorage(): StateStorage | undefined {
 export function createToolViewStateStore(limit = 500, storage?: StateStorage, storageKey = TOOL_STATE_KEY) {
   if (!Number.isInteger(limit) || limit < 1) throw new RangeError('Tool view state limit must be a positive integer');
   const entries = new Map<string, ToolViewState>();
+  const listeners = new Set<() => void>();
+  let revision = 0;
   const key = (sessionId: string, toolId: string) => JSON.stringify([sessionId, toolId]);
   for (const [id, state] of storedEntries(storage, storageKey)) {
     entries.delete(id);
@@ -69,7 +71,11 @@ export function createToolViewStateStore(limit = 500, storage?: StateStorage, st
       entries.set(id, { open: state.open, tab: state.tab });
       trim();
       save();
+      revision++;
+      for (const listener of listeners) listener();
     },
+    subscribe(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    getSnapshot(): number { return revision; },
   };
 }
 

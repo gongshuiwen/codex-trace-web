@@ -42,8 +42,6 @@ export function UsageBlock({ usage, label }: { usage: UsageSummary; label: strin
     ['缓存写入', exactTokens(value?.cacheWriteInputTokens)],
     [<>推理输出 <span title="属于输出的一部分，不与输出重复相加">ⓘ</span></>, exactTokens(value?.reasoningOutputTokens)],
     ['模型调用', `${usage.completeness === 'partial' ? '至少 ' : ''}${usage.requestCount} 次`],
-    ['最近一次输入', exactTokens(usage.latestInputTokens)],
-    ['上下文窗口', exactTokens(usage.contextWindow)],
   ] as const;
   return <section className="usage-block border-b border-[var(--border)] px-6 py-5">
     <div className="detail-section-heading flex items-center justify-between gap-3 text-[12px] leading-5 font-medium text-[var(--soft)]"><span>{label}</span>{usage.completeness !== 'complete' && <span className="subtle-badge shrink-0 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-[11px] leading-4 font-normal whitespace-nowrap text-[var(--warning)]">{usage.completeness === 'partial' ? '部分记录' : '缺少记录'}</span>}</div>
