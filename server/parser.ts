@@ -3,7 +3,7 @@ import { open, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { IndexedSession } from './parser-types.js';
-import type { CollaborationMessage, OutputPage, RequestUsage, SessionActivity, SessionSummary, TimelineEvent, ToolCall, TurnDetail, TurnSummary } from '../shared/types.js';
+import type { CollaborationMessage, CompactionPage, OutputPage, RequestUsage, SessionActivity, SessionSummary, TimelineEvent, ToolCall, ToolFailurePage, TurnDetail, TurnSummary } from '../shared/types.js';
 import { UsageLedger } from './usage.js';
 import { parseCollaborationMessage } from './collaboration.js';
 
@@ -12,6 +12,8 @@ interface Line { start: number; end: number; value: Json | null; partial?: boole
 interface MutableTurn {
   summary: TurnSummary;
   callIds: Set<string>;
+  toolStatuses: Map<string, ToolCall['status']>;
+  failureCount: number;
   messages: Map<string, { kind: string; text: string }>;
   hasEventPrompt: boolean;
 }
@@ -33,7 +35,9 @@ interface CachedIndex {
   ended: boolean;
   hasTaskStarted: boolean;
   entryOrdinal: number;
-  compactions: { id: string; turnId?: string; timestamp: string; offset: number }[];
+  compactions: { id: string; turnId?: string; navigationTurnId?: string; timestamp: string; offset: number }[];
+  firstTimestamp: number | null;
+  lastTimestamp: number | null;
   activityMessages: SessionActivity['messages'];
   agentPath?: string;
   index: IndexedSession | null;
@@ -125,14 +129,22 @@ async function* readLines(filePath: string, start = 0, end?: number): AsyncGener
 function emptyState(): CachedIndex {
   return { fingerprint: '', identity: '', prefix: '', anchor: '', scanOffset: 0, meta: {}, turns: new Map(), currentTurnId: '', counter: 0,
     ledger: new UsageLedger(), outputs: new Map(), parseErrors: 0, partialTail: false, model: '', ended: false, hasTaskStarted: false, entryOrdinal: 0,
-    compactions: [], activityMessages: [], index: null };
+    compactions: [], firstTimestamp: null, lastTimestamp: null, activityMessages: [], index: null };
+}
+
+function recordTimestamp(state: CachedIndex, timestamp: string): void {
+  const value = Date.parse(timestamp);
+  if (!Number.isFinite(value)) return;
+  state.firstTimestamp = Math.min(state.firstTimestamp ?? value, value);
+  state.lastTimestamp = Math.max(state.lastTimestamp ?? value, value);
 }
 
 function ensureTurn(state: CachedIndex, id: string, timestamp: string, offset: number): MutableTurn {
   let turn = state.turns.get(id);
   if (!turn) {
     turn = { summary: { id, index: state.turns.size, prompt: '', preview: '', startedAt: timestamp, status: 'running', model: state.model,
-      toolCount: 0, usage: state.ledger.summary(id), startOffset: offset, endOffset: offset }, callIds: new Set(), messages: new Map(), hasEventPrompt: false };
+      toolCount: 0, toolFailureCount: 0, compactionCount: 0, usage: state.ledger.summary(id), startOffset: offset, endOffset: offset },
+      callIds: new Set(), toolStatuses: new Map(), failureCount: 0, messages: new Map(), hasEventPrompt: false };
     state.turns.set(id, turn);
   }
   state.currentTurnId = id;
@@ -201,14 +213,20 @@ function processLine(state: CachedIndex, line: Line): void {
     // session_meta and transcript. Only the first metadata describes this file.
     // Replacing it with inherited metadata makes a child overwrite the parent's
     // SQLite index row and sends detail requests to an entirely different file.
-    if (!Object.keys(state.meta).length) state.meta = { ...payload };
+    if (!Object.keys(state.meta).length) {
+      state.meta = { ...payload };
+      recordTimestamp(state, timestamp || epochTimestamp(payload.timestamp, ''));
+    }
     return;
   }
   const historyStart = state.meta.subagent_history_start_ordinal;
   if (typeof historyStart === 'number' && ordinal < historyStart) return;
+  recordTimestamp(state, timestamp);
+  let compaction: CachedIndex['compactions'][number] | undefined;
   if (type === 'compacted') {
     const turnId = typeof payload.turn_id === 'string' ? payload.turn_id : state.currentTurnId;
-    state.compactions.push({ id: `notice-${line.start}`, timestamp, offset: line.start, ...(turnId ? { turnId } : {}) });
+    compaction = { id: `notice-${line.start}`, timestamp, offset: line.start, ...(turnId ? { turnId } : {}) };
+    state.compactions.push(compaction);
   }
   if (type === 'session_end') { state.ended = true; return; }
   if (type === 'event_msg' && payload.type === 'task_started') {
@@ -232,10 +250,14 @@ function processLine(state: CachedIndex, line: Line): void {
   if (classified?.kind === 'user' && !payload.turn_id && (!active || (active.summary.status !== 'running' && !active.messages.has(`user:${classified.text}`)))) {
     ensureTurn(state, `turn-${++state.counter}`, timestamp, line.start);
   }
-  if (!state.currentTurnId && !classified && type !== 'turn_context' && !toolShape(type, payload)
+  if (!state.currentTurnId && !classified && type !== 'turn_context' && type !== 'compacted' && !toolShape(type, payload)
     && !(type === 'token_usage_record' && typeof payload.turn_id === 'string')) return;
   const turn = currentTurn(state, payload, timestamp, line.start);
   turn.summary.endOffset = line.end;
+  if (compaction) {
+    compaction.navigationTurnId = turn.summary.id;
+    turn.summary.compactionCount = (turn.summary.compactionCount ?? 0) + 1;
+  }
   if (classified?.collaboration) {
     const collaboration = classified.collaboration;
     if (!state.agentPath && parentSessionId(state.meta) && collaboration.messageType === 'NEW_TASK') state.agentPath = collaboration.taskName;
@@ -273,8 +295,19 @@ function processLine(state: CachedIndex, line: Line): void {
   const shape = toolShape(type, payload);
   if (shape) {
     const id = String(payload.call_id ?? payload.id ?? `tool-${line.start}`);
-    if (shape === 'call') { turn.callIds.add(id); turn.summary.toolCount = turn.callIds.size; }
-    else state.outputs.set(id, { start: line.start, end: line.end });
+    // Output-only records are displayed as unknown tools in detail, so count their identities too.
+    turn.callIds.add(id);
+    turn.summary.toolCount = turn.callIds.size;
+    if (shape === 'call') {
+      if (!turn.toolStatuses.has(id)) turn.toolStatuses.set(id, payload.status === 'completed' ? 'completed' : 'running');
+    } else {
+      const status = inferOutput(payload, contentText(payload.output)).status;
+      if (turn.toolStatuses.get(id) === 'failed') turn.failureCount--;
+      if (status === 'failed') turn.failureCount++;
+      turn.toolStatuses.set(id, status);
+      turn.summary.toolFailureCount = turn.failureCount;
+      state.outputs.set(id, { start: line.start, end: line.end });
+    }
   }
 }
 
@@ -292,7 +325,8 @@ function buildIndex(state: CachedIndex, filePath: string, fileSize: number, upda
   const turns = [...state.turns.values()].map(turn => {
     let status = turn.summary.status;
     if (status === 'running' && (state.ended || Date.now() - Date.parse(updatedAt) > 60_000)) status = 'interrupted';
-    return { ...turn.summary, status, usage: state.ledger.summary(turn.summary.id), model: turn.summary.model || state.model };
+    return { ...turn.summary, status, toolFailureCount: turn.failureCount,
+      usage: state.ledger.summary(turn.summary.id), model: turn.summary.model || state.model };
   });
   const cwd = typeof meta.cwd === 'string' ? meta.cwd : '';
   const id = String(meta.id ?? meta.session_id ?? meta.thread?.sessionId ?? path.basename(filePath).match(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i)?.[0]
@@ -310,6 +344,9 @@ function buildIndex(state: CachedIndex, filePath: string, fileSize: number, upda
     startedAt: epochTimestamp(meta.timestamp, turns[0]?.startedAt || updatedAt), updatedAt,
     status: turns.at(-1)?.status ?? 'unknown', turnCount: turns.length,
     toolCount: turns.reduce((count, turn) => count + turn.toolCount, 0),
+    toolFailureCount: turns.reduce((count, turn) => count + turn.toolFailureCount, 0),
+    durationMs: state.firstTimestamp == null || state.lastTimestamp == null ? null : state.lastTimestamp - state.firstTimestamp,
+    compactionCount: state.compactions.length,
     ...(typeof parentId === 'string' ? { parentId } : {}), filePath, fileSize, revision,
     ...(agentName ? { agentName } : {}), ...(agentNickname ? { agentNickname } : {}),
     usage: state.ledger.summary(), parseErrors: state.parseErrors,
@@ -375,7 +412,7 @@ export async function loadSessionActivity(filePath: string): Promise<SessionActi
   const state = await getState(filePath);
   const requests = state.ledger.requestsInOrder();
   const warnings: string[] = [];
-  const compactions = state.compactions.map(({ offset, turnId, ...marker }) => ({
+  const compactions = state.compactions.map(({ offset, turnId, navigationTurnId: _navigationTurnId, ...marker }) => ({
     ...marker, ...(turnId && state.turns.has(turnId) ? { turnId } : {}),
     beforeRequestIndex: state.ledger.countRequestsBefore(offset),
   }));
@@ -404,9 +441,11 @@ function inferOutput(payload: Json, output: string): Pick<ToolCall, 'status' | '
   if (payload.output && typeof payload.output === 'object' && !Array.isArray(payload.output)) structured = payload.output;
   else { try { structured = JSON.parse(output); } catch { /* ordinary command output */ } }
   const exitMatch = output.match(/(?:exit(?:ed)?(?: with)? code|exit_code)\s*[:=]?\s*(-?\d+)/i);
-  const exitCode = typeof structured.exit_code === 'number' ? structured.exit_code : exitMatch ? Number(exitMatch[1]) : undefined;
-  const failed = payload.is_error === true || payload.isError === true || structured.isError === true || (exitCode != null && exitCode !== 0);
-  return { status: failed ? 'failed' : 'completed', ...(exitCode != null ? { exitCode } : {}) };
+  const exitCode = typeof structured.exit_code === 'number' ? structured.exit_code
+    : typeof payload.exit_code === 'number' ? payload.exit_code : exitMatch ? Number(exitMatch[1]) : undefined;
+  const failed = payload.is_error === true || payload.isError === true || structured.isError === true || structured.is_error === true
+    || (exitCode != null && exitCode !== 0);
+  return { status: failed ? 'failed' : 'completed', exitCode };
 }
 
 export async function loadTurnDetail(filePath: string, turnId: string): Promise<TurnDetail> {
@@ -468,7 +507,7 @@ export async function loadTurnDetail(filePath: string, turnId: string): Promise<
     }
     if (type === 'turn_context') push({ id: `context-${line.start}`, kind: 'context', timestamp, text: JSON.stringify(payload, null, 2) });
     if (type === 'response_item' && payload.type === 'additional_tools') push({ id: `context-${line.start}`, kind: 'context', timestamp, text: JSON.stringify(payload, null, 2) });
-    if (type === 'compacted') push({ id: `notice-${line.start}`, kind: 'notice', timestamp, text: '上下文已压缩' });
+    if (type === 'compacted') push({ id: `notice-${line.start}`, kind: 'notice', noticeType: 'compaction', timestamp, text: '上下文已压缩' });
     if (type === 'event_msg' && ['warning', 'error', 'turn_aborted'].includes(payload.type)) push({ id: `notice-${line.start}`, kind: 'notice', timestamp, text: String(payload.message ?? payload.reason ?? payload.type) });
     const knownItem = ['message', 'reasoning', 'additional_tools', 'agent_message', 'configuration_update'];
     if (!message && !shape && !ignoredTop.has(type) && type !== 'turn_context' && type !== 'compacted'
@@ -483,6 +522,41 @@ export async function loadTurnDetail(filePath: string, turnId: string): Promise<
   if (state.partialTail) warnings.push('日志末尾有尚未写完的记录，补齐后会自动更新。');
   if (summary.usage.completeness === 'partial') warnings.push('部分用量来自累计快照差值，调用数量可能只是下界。');
   return { summary, events, requests: state.ledger.requestsForTurn(turnId), warnings };
+}
+
+/** Read only the failed turns needed for this page; summaries already contain final deduplicated counts. */
+export async function loadToolFailures(filePath: string, offset = 0, limit = 20): Promise<ToolFailurePage> {
+  const state = await getState(filePath);
+  const turns = state.index!.turns.filter(turn => (turn.toolFailureCount ?? 0) > 0);
+  const total = state.index!.session.toolFailureCount!;
+  const from = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+  const count = Number.isFinite(limit) ? Math.min(100, Math.max(1, Math.floor(limit))) : 20;
+  const items: ToolFailurePage['items'] = [];
+  let skip = from;
+  for (const turn of turns) {
+    if (skip >= turn.toolFailureCount!) { skip -= turn.toolFailureCount!; continue; }
+    const detail = await loadTurnDetail(filePath, turn.id);
+    const failures = detail.events.filter(event => event.tool?.status === 'failed');
+    for (const event of failures.slice(skip)) {
+      items.push({ turnId: turn.id, eventId: event.id, toolId: event.tool!.id, toolName: event.tool!.name });
+      if (items.length >= count) break;
+    }
+    skip = 0;
+    if (items.length >= count) break;
+  }
+  return { items, total, nextOffset: from + items.length < total ? from + items.length : null };
+}
+
+/** Navigation metadata is indexed once; paging never loads transcript or compacted bodies. */
+export async function loadCompactions(filePath: string, offset = 0, limit = 20): Promise<CompactionPage> {
+  const state = await getState(filePath);
+  const from = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+  const count = Number.isFinite(limit) ? Math.min(100, Math.max(1, Math.floor(limit))) : 20;
+  const items = state.compactions.slice(from, from + count).map(marker => ({
+    turnId: marker.navigationTurnId!, eventId: marker.id, timestamp: marker.timestamp,
+  }));
+  const total = state.compactions.length;
+  return { items, total, nextOffset: from + items.length < total ? from + items.length : null };
 }
 
 export async function loadToolOutput(filePath: string, callId: string, offset = 0, limit = DEFAULT_OUTPUT_LIMIT): Promise<OutputPage> {

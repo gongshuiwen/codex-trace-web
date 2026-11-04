@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionSummary } from '../shared/types';
-import { createParticipantLabels, messageDirection, messageKey, messageTypeLabel, participantLabel } from '../client/collaboration-message';
+import { createParticipantLabels, messageDirection, messageKey, messageRoute, messageTypeLabel, participantLabel } from '../client/collaboration-message';
 
 function session(id: string, parentId?: string, agentName?: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
   return { id, parentId, agentName, title: '会话标题', cwd: '/project', project: 'project', model: 'test', source: 'synthetic',
@@ -25,14 +25,21 @@ describe('message presentation', () => {
     expect(messageDirection({ recipientId: 'frontend' }, 'frontend')).toBe('received');
   });
 
-  it('distinguishes incoming and outgoing assignments and results without changing ordinary messages', () => {
+  it('keeps the same message type labels for every direction and both views', () => {
     expect(['received', 'sent', 'self', 'unknown'].map(direction => messageTypeLabel('NEW_TASK', direction as 'received' | 'sent' | 'self' | 'unknown')))
-      .toEqual(['收到任务', '派发任务', '任务分派', '任务分派']);
-    expect(messageTypeLabel('FINAL_ANSWER', 'received')).toBe('收到结果');
-    expect(messageTypeLabel('FINAL_ANSWER', 'sent')).toBe('提交结果');
+      .toEqual(['任务分派', '任务分派', '任务分派', '任务分派']);
+    expect(messageTypeLabel('FINAL_ANSWER', 'received')).toBe('结果汇报');
+    expect(messageTypeLabel('FINAL_ANSWER', 'sent')).toBe('结果汇报');
     expect(messageTypeLabel('FINAL_ANSWER', 'self')).toBe('结果汇报');
     expect(messageTypeLabel('FINAL_ANSWER', 'unknown')).toBe('结果汇报');
     expect(messageTypeLabel('MESSAGE', 'received')).toBe('协作消息');
+  });
+
+  it('shows both endpoints using confirmed labels and keeps unlinked endpoints explicit', () => {
+    const labels = createParticipantLabels([session('root'), session('frontend', 'root', '/root/frontend')]);
+    expect(messageRoute({ senderId: 'frontend', recipientId: 'root', sender: '/root/frontend', taskName: '/root' }, labels)).toBe('frontend → 主代理');
+    expect(messageRoute({ senderId: 'frontend', sender: '/root/frontend', taskName: '/root' }, labels)).toBe('frontend → root（未关联）');
+    expect(messageRoute({ sender: '/root/frontend', taskName: '/root/frontend' }, labels)).toBe('frontend（未关联） → frontend（未关联）');
   });
 });
 

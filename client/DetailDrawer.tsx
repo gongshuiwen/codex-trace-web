@@ -1,14 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { X, ArrowUpRight, Code2, Hash, Layers3 } from 'lucide-react';
+import { X, ArrowUpRight, ChevronDown, ChevronUp, Code2, Hash, Layers3 } from 'lucide-react';
 import type { RequestUsage, SessionActivity, SessionDetail, TurnDetail } from '../shared/types';
 import { api, errorMessage, isAbort, sessionPath } from './api';
 import { UsageBlock } from './Stats';
-import { clock, exactTokens, prettyArguments } from './format';
+import { clock, exactTokens } from './format';
 import type { Inspection } from './TurnCard';
 import { RequestContext } from './RequestContext';
 import { RequestComparison } from './RequestComparison';
 import { useOverlayFocus } from './useOverlayFocus';
 import { latestRecordedRequest } from './latest-request';
+import { ToolContent } from './ToolContent';
+import { toolPresentation } from './tool-presentation';
 
 function RequestCard({ request, index, sessionId, revision, onNavigateTurn, selected }: { request: RequestUsage; index: number; sessionId: string; revision: string; onNavigateTurn: (turnId: string) => void; selected: boolean }) {
   const [open, setOpen] = useState(selected);
@@ -45,6 +47,7 @@ export function DetailDrawer({ session, selection, onClose, onNavigateTurn }: { 
   const [error, setError] = useState('');
   const [latest, setLatest] = useState<{ key: string; request: RequestUsage | null; failed?: boolean } | null>(null);
   const [modal, setModal] = useState(() => window.matchMedia('(max-width: 1200px)').matches);
+  const [showToolStatistics, setShowToolStatistics] = useState(false);
   const titleId = useId();
   const drawerRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -54,11 +57,16 @@ export function DetailDrawer({ session, selection, onClose, onNavigateTurn }: { 
   const closeRef = useRef<HTMLButtonElement>(null);
   const loadedSelection = useRef('');
   const latestMode = selection.focus === 'latest';
+  const toolMode = Boolean(selection.toolId);
+  const searchNavigation = selection.searchNavigation;
+  const searchStale = Boolean(searchNavigation && searchNavigation.revision !== session.session.revision);
+  const drawerModal = toolMode || modal;
   const latestKey = `${session.session.id}\u0000${session.session.revision}\u0000${session.session.usage.latestInputTokens ?? 'unknown'}`;
   const latestLoading = latestMode && latest?.key !== latestKey;
   const latestRequest = latestMode && latest?.key === latestKey ? latest.request : null;
   const targetTurnId = latestMode ? latestRequest?.turnId : selection.turnId;
-  useOverlayFocus({ container: drawerRef, initialFocus: closeRef, modal, onClose });
+  useOverlayFocus({ container: drawerRef, initialFocus: closeRef, modal: drawerModal, onClose });
+  useEffect(() => { setShowToolStatistics(false); }, [selection.toolId, selection.navigationId]);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1200px)');
     const update = () => setModal(media.matches);
@@ -131,23 +139,48 @@ export function DetailDrawer({ session, selection, onClose, onNavigateTurn }: { 
     return () => cancelAnimationFrame(frame);
   }, [selection, activeTurn?.summary.id, displayedTurn?.summary.id, selectedRequestId, latestLoading, latestFallback, targetTurnId]);
   const tool = displayedTurn?.events.find(event => event.tool?.id === selection.toolId)?.tool;
+  const presentation = tool ? toolPresentation(tool) : null;
+  function toggleToolStatistics(show: boolean) { setShowToolStatistics(show); requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' })); }
+  function searchKeyboard(event: React.KeyboardEvent<HTMLElement>) {
+    if (!searchNavigation || searchStale || event.defaultPrevented || event.nativeEvent.isComposing || event.ctrlKey || event.metaKey) return;
+    const target = event.target as HTMLElement;
+    const enter = event.key === 'Enter' && !event.altKey && !target.closest('button,a,input,textarea,select,summary,[role="button"],[contenteditable="true"]');
+    const direction = event.altKey && event.key === 'ArrowUp' || enter && event.shiftKey ? -1
+      : event.altKey && event.key === 'ArrowDown' || enter && !event.altKey ? 1 : 0;
+    if (!direction) return;
+    event.preventDefault(); event.stopPropagation();
+    const index = searchNavigation.index + direction;
+    if (index >= 0 && index < searchNavigation.total) searchNavigation.onNavigate(index);
+  }
   return <>
-    <button className={`drawer-backdrop border-0 ${modal ? 'fixed inset-0 z-[30] block bg-[#102318]/25' : 'hidden'}`} aria-label="关闭详情" tabIndex={-1} aria-hidden="true" onClick={onClose} />
-    <aside ref={drawerRef} className={`detail-drawer z-[31] flex min-w-0 flex-col border-l border-(--border) bg-(--panel) text-(--text) ${modal ? 'fixed inset-y-0 right-0 w-[360px] max-w-[calc(100vw-24px)] shadow-[-12px_0_40px_#14251a17] max-[560px]:w-full max-[560px]:max-w-none max-[560px]:border-l-0' : 'relative w-[354px] shrink-0'}`} role={modal ? 'dialog' : undefined} aria-modal={modal || undefined} aria-labelledby={titleId} tabIndex={-1}>
+    <button className={`drawer-backdrop border-0 ${drawerModal ? 'fixed inset-0 z-[30] block bg-[#102318]/25' : 'hidden'}`} aria-label="关闭详情" tabIndex={-1} aria-hidden="true" onClick={onClose} />
+    <aside ref={drawerRef} className={`detail-drawer z-[31] flex min-w-0 flex-col border-l border-(--border) bg-(--panel) text-(--text) ${toolMode && !showToolStatistics ? 'tool-reader-content-mode' : ''} ${toolMode ? 'tool-reader-drawer fixed inset-y-0 right-0 w-[800px] max-w-[calc(100vw-24px)] shadow-[-12px_0_40px_#14251a17] max-[600px]:w-full max-[600px]:max-w-none max-[600px]:border-l-0' : modal ? 'fixed inset-y-0 right-0 w-[360px] max-w-[calc(100vw-24px)] shadow-[-12px_0_40px_#14251a17] max-[560px]:w-full max-[560px]:max-w-none max-[560px]:border-l-0' : 'relative w-[354px] shrink-0'}`} role={drawerModal ? 'dialog' : undefined} aria-modal={drawerModal || undefined} aria-labelledby={titleId} tabIndex={-1} onKeyDown={searchKeyboard}>
       <div className="drawer-heading flex h-[76px] min-h-[76px] shrink-0 items-center justify-between gap-[16px] border-b border-(--border) px-[24px] max-[560px]:h-[68px] max-[560px]:min-h-[68px] max-[560px]:px-[20px]">
-        <h2 id={titleId} className="m-0 min-w-0 text-[18px] leading-[1.4] font-semibold">{selection.toolId ? '调用详情' : latestMode ? exactLatestRequest ? '最近一次调用' : '最近输入摘要' : selection.turnId ? '轮次统计' : '会话统计'}</h2>
+        <h2 id={titleId} className="m-0 min-w-0 text-[18px] leading-[1.4] font-semibold">{selection.toolId ? showToolStatistics ? '调用所属轮次统计' : '调用详情' : latestMode ? exactLatestRequest ? '最近一次调用' : '最近输入摘要' : selection.turnId ? '轮次统计' : '会话统计'}</h2>
         <button ref={closeRef} className="icon-button inline-flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-[6px] border-0 bg-transparent text-(--muted) hover:bg-(--hover) hover:text-(--text) max-[560px]:h-[44px] max-[560px]:w-[44px]" onClick={onClose} title="关闭详情 (Esc)" aria-label="关闭详情"><X size={18} /></button>
       </div>
+      {toolMode && searchNavigation && <div className="tool-search-drawer-navigation">
+        <span role="status" aria-atomic="true">{searchStale ? '会话已更新，请关闭详情后重新搜索。' : `搜索结果 ${searchNavigation.index + 1} / ${searchNavigation.total}${searchNavigation.truncated ? '+' : ''}`}</span>
+        <div className="tool-search-navigation" role="group" aria-label="工具搜索结果导航">
+          <button type="button" disabled={searchStale || searchNavigation.index === 0} onClick={() => searchNavigation.onNavigate(searchNavigation.index - 1)} title="上一条 (Alt+↑)" aria-label="上一条工具搜索结果"><ChevronUp size={15} />上一条</button>
+          <button type="button" disabled={searchStale || searchNavigation.index + 1 >= searchNavigation.total} onClick={() => searchNavigation.onNavigate(searchNavigation.index + 1)} title="下一条 (Alt+↓)" aria-label="下一条工具搜索结果">下一条<ChevronDown size={15} /></button>
+        </div>
+      </div>}
       <div ref={scrollRef} className="drawer-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin]">
         {error && <div className="inline-error m-[20px] rounded-[6px] border border-(--danger)/25 bg-(--bg) p-[12px] text-[12px] leading-[1.8] text-(--danger) [overflow-wrap:anywhere]" role="alert">{error}</div>}
         {(latestLoading || targetTurnId && !activeTurn && !error) && <div className="turn-loading flex items-center gap-[8px] px-[24px] py-[16px] text-[12px] leading-[1.8] text-(--muted)" role="status">{latestMode ? '正在定位最近输入记录…' : '正在读取明细…'}</div>}
-        {tool && <section className="tool-detail border-b border-(--border) p-[24px] max-[560px]:p-[20px]">
-          <div className="detail-section-heading flex items-center gap-[8px] text-[14px] font-medium text-(--soft) [overflow-wrap:anywhere]"><Code2 size={15} /><span>{tool.name}</span></div>
-          <div className="detail-note mt-[12px] text-[12px] leading-[1.8] text-(--muted) [overflow-wrap:anywhere]">调用 ID <code className="font-mono text-[12px]">{tool.id}</code></div>
-          <pre className="inspector-code mt-[12px] max-h-[260px] overflow-auto rounded-[6px] border border-(--border) bg-(--code) p-[12px] font-mono text-[12px] leading-[1.7] whitespace-pre-wrap text-(--soft) [overflow-wrap:anywhere]">{prettyArguments(tool.arguments)}</pre>
-          <p className="detail-note mt-[12px] mb-0 text-[12px] leading-[1.8] text-(--muted) [overflow-wrap:anywhere]">输出共 {tool.outputLength.toLocaleString()} 字符。展开时间线中的工具卡片可分段读取输出。</p>
-          <div className="detail-note mt-[12px] text-[12px] leading-[1.8] text-(--muted) [overflow-wrap:anywhere]">此调用本身没有独立 token 账单，下方展示其所在轮次的模型用量。</div>
+        {toolMode && !showToolStatistics && tool && presentation && <section className="tool-detail">
+          <div className="tool-reader-heading">
+            <div className="tool-reader-title"><Code2 size={16} /><span>{presentation.title}</span><span className={`tool-call-state ${tool.status}`}>{tool.status === 'failed' ? `失败${tool.exitCode != null ? ` · 退出码 ${tool.exitCode}` : ''}` : tool.status === 'running' ? '运行中' : tool.status === 'unknown' ? '结果未记录' : tool.exitCode === 0 ? '完成' : '已返回'}</span></div>
+            {presentation.subtitle && <p className="tool-reader-subtitle">{presentation.subtitle}</p>}
+            <p className="tool-reader-subtitle">调用 ID <code>{tool.id}</code></p>
+            <div className="tool-reader-context"><span>第 {(displayedTurn?.summary.index ?? 0) + 1} 轮 · 此工具没有独立 token 用量</span><button type="button" onClick={() => toggleToolStatistics(true)}>查看所属轮次统计</button></div>
+          </div>
+          <ToolContent key={`${tool.id}:${selection.navigationId ?? ''}`} tool={tool} sessionId={session.session.id} revision={session.session.revision} search={selection.search} navigationId={selection.navigationId} mode="detail" />
         </section>}
+        {toolMode && !showToolStatistics && activeTurn && !tool && <p className="tool-reader-empty">日志已变化，未找到这次工具调用。请关闭详情后重新定位。</p>}
+        {toolMode && showToolStatistics && <button type="button" className="tool-reader-back" onClick={() => toggleToolStatistics(false)}>返回工具详情</button>}
+        {(!toolMode || showToolStatistics) && <>
         {displayedTurn && <>
           <div ref={turnUsageRef} className="min-w-0"><UsageBlock usage={displayedTurn.summary.usage} label={`第 ${displayedTurn.summary.index + 1} 轮用量`} /></div>
           <section ref={requestListRef} className="request-list border-b border-(--border) px-[24px] pt-[16px] pb-[24px] max-[560px]:px-[20px]">
@@ -175,6 +208,7 @@ export function DetailDrawer({ session, selection, onClose, onNavigateTurn }: { 
             </div>)}
           </dl>
         </section>
+        </>}
       </div>
     </aside>
   </>;

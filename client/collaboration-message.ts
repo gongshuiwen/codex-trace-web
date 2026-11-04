@@ -1,6 +1,6 @@
 import type { SessionSummary } from '../shared/types';
 import type { CollaborationRecord } from './collaboration-data';
-import { sessionDisplayName } from './format';
+import { collaborationTypeLabels, sessionDisplayName } from './format';
 
 export type MessageDirection = 'received' | 'sent' | 'self' | 'unknown';
 
@@ -15,10 +15,13 @@ export function messageDirection(message: Pick<CollaborationRecord, 'senderId' |
   return sender && recipient ? 'self' : recipient ? 'received' : sender ? 'sent' : 'unknown';
 }
 
-export function messageTypeLabel(messageType: CollaborationRecord['messageType'], direction: MessageDirection): string {
-  if (messageType === 'MESSAGE') return '协作消息';
-  if (messageType === 'NEW_TASK') return direction === 'received' ? '收到任务' : direction === 'sent' ? '派发任务' : '任务分派';
-  return direction === 'received' ? '收到结果' : direction === 'sent' ? '提交结果' : '结果汇报';
+export function messageTypeLabel(messageType: CollaborationRecord['messageType'], _direction: MessageDirection): string {
+  return collaborationTypeLabels[messageType];
+}
+
+/** Direction is always explicit, regardless of which participant is selected. */
+export function messageRoute(message: Pick<CollaborationRecord, 'senderId' | 'recipientId' | 'sender' | 'taskName'>, labels: ReadonlyMap<string, string>): string {
+  return `${participantLabel(message.senderId, message.sender, labels)} → ${participantLabel(message.recipientId, message.taskName, labels)}`;
 }
 
 function taskPath(value: string | undefined): string | undefined {

@@ -1,0 +1,13 @@
+.user-prompt { margin:12px 0 24px; padding:14px 16px; border:1px solid var(--border); border-radius:8px; background:var(--panel); font-size:14px; line-height:1.85; }
+.user-prompt-text { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.user-prompt[data-expanded="false"] > .user-prompt-text { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:6; overflow:hidden; }
+.user-prompt-toggle { display:inline-flex; min-height:32px; align-items:center; gap:6px; margin-top:8px; padding:0; border:0; border-radius:var(--radius-control); background:transparent; color:var(--soft); font-size:12px; line-height:1.5; }
+.user-prompt-toggle:hover { color:var(--accent-strong); }
+.user-prompt-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.user-prompt-toggle[aria-expanded="true"] > svg { transform:rotate(180deg); }
+@media(min-width:601px) { .user-prompt-indented { margin-left:33px; } }
+@media(max-width:600px) {
+  .user-prompt { margin-bottom:20px; }
+  .user-prompt-toggle { min-height:44px; }
+}
+@container session (max-width:600px) { .user-prompt-toggle { min-height:44px; } }

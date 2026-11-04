@@ -1,4 +1,5 @@
 import type { TimelineEvent } from '../shared/types';
+import type { ToolTimelineEntry } from './tool-groups';
 
 export interface ContextGroup {
   kind: 'context-group';
@@ -7,8 +8,8 @@ export interface ContextGroup {
 }
 
 /** Wrap every consecutive context run without moving or changing recorded events. */
-export function groupAdjacentContexts(events: readonly TimelineEvent[]): (TimelineEvent | ContextGroup)[] {
-  const entries: (TimelineEvent | ContextGroup)[] = [];
+export function groupAdjacentContexts(events: readonly ToolTimelineEntry[]): (ToolTimelineEntry | ContextGroup)[] {
+  const entries: (ToolTimelineEntry | ContextGroup)[] = [];
   let pending: ContextGroup | undefined;
   for (const event of events) {
     if (event.kind === 'context') {

@@ -87,43 +87,6 @@
   overflow-wrap: anywhere;
 }
 
-.context-event {
-  margin: 12px 0;
-  color: var(--muted);
-  font-size: var(--fs-small);
-}
-
-.context-event summary {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  cursor: pointer;
-  list-style: none;
-  padding: 5px 0;
-  min-height: var(--control-height);
-}
-
-.context-event[open] summary svg {
-  transform: rotate(90deg);
-}
-
-.context-event summary small {
-  margin-left: auto;
-  font: var(--fs-small) var(--font-mono);
-}
-
-.context-event pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: var(--code);
-  padding: 12px;
-  border: 1px solid var(--border);
-  max-height: 320px;
-  overflow: auto;
-  border-radius: 6px;
-  font: var(--fs-small)/1.7 var(--font-mono);
-}
-
 .inline-error {
   font-size: var(--fs-small);
   color: var(--danger);

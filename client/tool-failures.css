@@ -1,0 +1,16 @@
+.session-record-navigation { flex:none; padding:4px var(--canvas-pad); border-bottom:1px solid var(--border); background:var(--panel); font-size:12px; color:var(--soft); }
+.session-record-navigation-main { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; min-height:40px; }
+.session-record-symbol { flex:none; color:var(--accent-strong); }
+.tool-failure-symbol { color:var(--danger); }
+.session-record-position { flex:none; font-variant-numeric:tabular-nums; }
+.session-record-current { flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
+.session-record-actions { display:flex; align-items:center; gap:8px; margin-left:auto; }
+.session-record-actions>button { display:inline-flex; align-items:center; justify-content:center; gap:3px; min-height:36px; padding:4px 6px; border:0; background:transparent; color:var(--accent-strong); font-size:12px; }
+.session-record-actions>button:disabled { color:var(--muted); opacity:0.65; }
+.session-record-error { margin:4px 0 8px; color:var(--danger); line-height:1.6; overflow-wrap:anywhere; }
+@media(max-width:600px) {
+  .session-record-navigation { padding-inline:var(--canvas-pad); }
+  .session-record-current { flex:none; width:calc(100% - 25px); margin-left:25px; }
+  .session-record-actions { width:100%; justify-content:flex-end; }
+  .session-record-actions>button { min-height:44px; }
+}

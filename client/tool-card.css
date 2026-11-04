@@ -1,0 +1,68 @@
+.tool-summary-card { min-width:0; margin:10px 0; overflow:hidden; border:1px solid var(--border); border-radius:8px; background:var(--panel); }
+.tool-call-icon { color:var(--muted); }
+.tool-call-label { display:grid; gap:3px; min-width:0; }
+.tool-call-title { font-size:14px; font-weight:500; line-height:1.5; color:var(--text); overflow-wrap:anywhere; }
+.tool-call-subtitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; line-height:1.5; color:var(--muted); }
+.tool-call-state { display:inline-flex; align-items:center; justify-content:flex-end; gap:5px; font-size:12px; line-height:1.5; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.tool-call-state.running { color:var(--accent-strong); }
+.tool-call-state.failed { color:var(--danger); }
+.tool-call-state.unknown { color:var(--warning); }
+.tool-call-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 14px; border-block:1px solid var(--border); }
+.tool-call-tabs { display:flex; gap:18px; min-width:0; }
+.tool-call-tabs>button { min-height:40px; padding:8px 0; border:0; border-bottom:2px solid transparent; background:transparent; font-size:12px; color:var(--muted); white-space:nowrap; }
+.tool-call-tabs>button[aria-selected="true"] { border-bottom-color:var(--accent); color:var(--accent-strong); }
+.tool-call-copy { display:flex; align-items:center; justify-content:center; gap:5px; flex:none; min-height:36px; border:0; background:transparent; color:var(--soft); font-size:12px; }
+.tool-call-copy:hover { color:var(--accent-strong); }
+.tool-call-panel { min-width:0; }
+.tool-call-code { margin:0; max-height:330px; overflow:auto; padding:13px 14px; background:var(--code); color:var(--soft); font:12px/1.8 var(--font-mono); white-space:pre-wrap; overflow-wrap:anywhere; tab-size:2; }
+.tool-call-code code { font:inherit; }
+.tool-call-output-footer { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 12px; min-height:40px; padding:4px 14px; border-top:1px solid var(--border); color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+.tool-call-output-footer>button { display:inline-flex; align-items:center; gap:5px; min-height:32px; padding:0; border:0; background:transparent; font-size:12px; color:var(--accent-strong); }
+.tool-call-output-footer>button:disabled { color:var(--muted); }
+.tool-call-error { margin:0; padding:10px 14px; color:var(--danger); background:color-mix(in srgb,var(--danger) 6%,var(--panel)); font-size:12px; overflow-wrap:anywhere; }
+.tool-result { padding:14px; min-width:0; }
+.tool-result-metadata { display:flex; flex-wrap:wrap; gap:6px 18px; margin:0 0 12px; font-size:12px; line-height:1.7; }
+.tool-result-metadata>div { display:flex; flex-wrap:wrap; gap:3px 8px; min-width:0; }
+.tool-result-metadata dt { color:var(--muted); flex:none; }
+.tool-result-metadata dd { margin:0; color:var(--soft); overflow-wrap:anywhere; min-width:0; }
+.tool-result-metadata code { font:12px var(--font-mono); }
+.tool-result .tool-call-code { border-radius:4px; }
+.tool-command { margin-bottom:12px; max-height:200px; }
+.tool-result-diagnostic { margin-bottom:12px; padding:9px 12px; border-left:2px solid var(--danger); background:color-mix(in srgb,var(--danger) 6%,var(--panel)); }
+.tool-result-diagnostic>span { color:var(--danger); font-size:12px; }
+.tool-result-diagnostic>p { margin:4px 0 0; font-size:13px; line-height:1.65; color:var(--text); white-space:pre-wrap; overflow-wrap:anywhere; }
+.tool-result-note { margin:0; color:var(--muted); font-size:12px; line-height:1.7; }
+.tool-result-empty { margin:0; color:var(--muted); font-size:13px; line-height:1.7; }
+.tool-output-partial { margin-bottom:8px; }
+.tool-patch-result { margin:0 0 12px; }
+.tool-patch-file { margin-top:8px; border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+.tool-patch-file>summary { min-height:38px; padding:9px 12px; font-size:12px; line-height:1.7; color:var(--soft); overflow-wrap:anywhere; cursor:pointer; }
+.tool-patch-kind { margin-right:8px; color:var(--muted); }
+.tool-patch-code span { display:block; white-space:pre-wrap; overflow-wrap:anywhere; }
+.tool-diff-add { color:var(--accent-strong); background:color-mix(in srgb,var(--accent) 7%,var(--code)); }
+.tool-diff-remove { color:var(--danger); background:color-mix(in srgb,var(--danger) 6%,var(--code)); }
+.tool-diff-meta { color:var(--muted); }
+.tool-result-queries { margin-bottom:12px; }
+.tool-result-queries>p { margin:5px 0 0; color:var(--text); font-size:13px; overflow-wrap:anywhere; }
+.tool-web-results { margin:0; padding:0; list-style:none; }
+.tool-web-results>li { padding:10px 0; overflow-wrap:anywhere; }
+.tool-web-results>li+li { border-top:1px solid var(--border); }
+.tool-web-results a { color:var(--accent-strong); font-size:14px; font-weight:500; }
+.tool-web-results span { display:block; margin-top:3px; font-size:12px; color:var(--muted); }
+.tool-web-results p { margin:6px 0 0; font-size:13px; line-height:1.7; color:var(--soft); }
+.tool-json-view { max-height:330px; overflow:auto; padding:10px 12px; border-radius:4px; background:var(--code); font:12px/1.8 var(--font-mono); color:var(--soft); overflow-wrap:anywhere; }
+.tool-json-toggle { display:flex; align-items:baseline; gap:6px; min-height:30px; padding:2px 0; border:0; background:transparent; color:var(--muted); font:inherit; text-align:left; }
+.tool-json-key { color:var(--text); overflow-wrap:anywhere; }
+.tool-json-children { margin-left:12px; padding-left:8px; border-left:1px solid var(--border); }
+.tool-json-scalar { padding:3px 0; min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.tool-result-text-button { display:block; min-height:36px; padding:4px 0; border:0; background:transparent; color:var(--accent-strong); font-size:12px; text-align:left; }
+@media(max-width:600px) {
+  .tool-call-toolbar { flex-wrap:wrap; gap:0 8px; padding-inline:10px; }
+  .tool-call-tabs { gap:14px; }
+  .tool-call-tabs>button,.tool-call-copy,.tool-call-output-footer>button,.tool-json-toggle,.tool-result-text-button { min-height:44px; }
+  .tool-call-copy { margin-left:auto; }
+  .tool-result { padding:12px 10px; }
+  .tool-call-code { padding:12px 10px; }
+  .tool-call-output-footer { padding-inline:10px; }
+  .tool-json-children { margin-left:6px; padding-left:6px; }
+}

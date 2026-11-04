@@ -39,13 +39,20 @@ function difference(current: TokenUsage, previous: TokenUsage): TokenUsage {
   return result;
 }
 
-interface UsageRecord extends RequestUsage { sequence: number; cumulative: TokenUsage | null; }
+function recordedInputTokens(value: unknown): number | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Json;
+  const input = raw.input_tokens ?? raw.inputTokens;
+  return typeof input === 'number' && Number.isFinite(input) && input >= 0 ? input : null;
+}
+
+interface UsageRecord extends RequestUsage { sequence: number; cumulative: TokenUsage | null; latestInputTokens: number | null; }
 interface Snapshot {
   sequence: number;
   turnId: string;
   timestamp: string;
   cumulative: TokenUsage;
-  latest: TokenUsage | null;
+  latestInputTokens: number | null;
   model?: string;
   contextWindow?: number;
 }
@@ -54,11 +61,18 @@ interface Snapshot {
 export class UsageLedger {
   private records = new Map<string, UsageRecord>();
   private snapshots: Snapshot[] = [];
-  private contextWindows = new Map<string, number>();
+  private contextWindows = new Map<string, { value: number; model?: string }>();
   private resolved: { requests: RequestUsage[]; partial: boolean } | null = null;
 
   setContextWindow(turnId: string, value: unknown): void {
-    if (typeof value === 'number' && value > 0) { this.contextWindows.set(turnId, value); this.resolved = null; }
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) { this.contextWindows.set(turnId, { value }); this.resolved = null; }
+  }
+
+  private contextWindowFor(turnId: string, model?: string): number | undefined {
+    const context = this.contextWindows.get(turnId);
+    if (!context || context.model && model && context.model !== model) return undefined;
+    if (!context.model && model) context.model = model;
+    return context.value;
   }
 
   ingest(type: string, payload: Json, turnId: string, timestamp: string, sequence: number, model?: string): void {
@@ -70,7 +84,7 @@ export class UsageLedger {
       const actualTurnId = String(payload.turn_id || turnId);
       this.records.set(id, {
         id, turnId: actualTurnId, timestamp, usage, sequence, model,
-        source: 'record', contextWindow: this.contextWindows.get(actualTurnId),
+        source: 'record', contextWindow: this.contextWindowFor(actualTurnId, model), latestInputTokens: recordedInputTokens(payload.usage),
         cumulative: normalizeUsage(payload.thread_token_usage),
       });
       this.resolved = null;
@@ -80,8 +94,8 @@ export class UsageLedger {
       this.setContextWindow(turnId, info.model_context_window);
       const cumulative = normalizeUsage(info.total_token_usage);
       if (cumulative) this.snapshots.push({
-        sequence, turnId, timestamp, cumulative, latest: normalizeUsage(info.last_token_usage), model,
-        contextWindow: this.contextWindows.get(turnId),
+        sequence, turnId, timestamp, cumulative, latestInputTokens: recordedInputTokens(info.last_token_usage), model,
+        contextWindow: this.contextWindowFor(turnId, model),
       });
       this.resolved = null;
     }
@@ -91,9 +105,7 @@ export class UsageLedger {
     if (this.resolved) return this.resolved;
     const records = [...this.records.values()];
     const sequence = new Map(records.map(record => [record.id, record.sequence]));
-    const requests: RequestUsage[] = records.map(({ sequence: _sequence, cumulative: _cumulative, ...request }) => ({
-      ...request, contextWindow: request.contextWindow ?? this.contextWindows.get(request.turnId),
-    }));
+    const requests: RequestUsage[] = records.map(({ sequence: _sequence, cumulative: _cumulative, latestInputTokens: _latestInputTokens, ...request }) => ({ ...request }));
     let previous = zeroUsage();
     let previousSequence = -1;
     let epoch = 0;
@@ -158,16 +170,18 @@ export class UsageLedger {
     const { requests: all, partial } = this.resolve();
     const requests = turnId ? all.filter(request => request.turnId === turnId) : all;
     const snapshots = turnId ? this.snapshots.filter(snapshot => snapshot.turnId === turnId) : this.snapshots;
-    const latestRequest = requests.at(-1);
+    const records = [...this.records.values()].filter(record => !turnId || record.turnId === turnId);
+    const latestRecord = records.at(-1);
     const latestSnapshot = snapshots.at(-1);
-    const latestInputTokens = latestSnapshot?.latest && (!latestRequest || latestSnapshot.timestamp >= latestRequest.timestamp)
-      ? latestSnapshot.latest.inputTokens : latestRequest?.usage.inputTokens ?? null;
+    // File order selects one source for both values. Clock skew and cumulative deltas
+    // cannot establish a newer individual model call or supply its missing input/window.
+    const latestSource = latestSnapshot && (!latestRecord || latestSnapshot.sequence >= latestRecord.sequence) ? latestSnapshot : latestRecord;
     return {
       tokens: requests.length ? requests.reduce((total, request) => addUsage(total, request.usage), zeroUsage()) : null,
       requestCount: requests.length,
       completeness: !requests.length ? 'unknown' : requests.some(request => request.source !== 'record') || (!turnId && partial) ? 'partial' : 'complete',
-      latestInputTokens,
-      contextWindow: latestSnapshot?.contextWindow ?? latestRequest?.contextWindow ?? (turnId ? this.contextWindows.get(turnId) : [...this.contextWindows.values()].at(-1)) ?? null,
+      latestInputTokens: latestSource?.latestInputTokens ?? null,
+      contextWindow: latestSource?.contextWindow ?? null,
     };
   }
 }

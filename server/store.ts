@@ -3,7 +3,7 @@ import type { IndexedSession } from './parser-types.js';
 import type { IndexProgress, SessionChildrenPage, SessionDetail, SessionList, SessionSummary } from '../shared/types.js';
 
 // Bump when parser semantics change so unchanged source files are reindexed.
-export const INDEX_SCHEMA_VERSION = 3;
+export const INDEX_SCHEMA_VERSION = 5;
 
 export interface ListOptions {
   query?: string;

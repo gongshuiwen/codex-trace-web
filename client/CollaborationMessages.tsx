@@ -1,36 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, ChevronDown, Repeat2 } from 'lucide-react';
+import { CollaborationMessageCard } from './CollaborationCard';
 import type { CollaborationRecord } from './collaboration-data';
-import { messageDirection, messageKey, messageTypeLabel, participantLabel } from './collaboration-message';
-import { clock, dateGroup } from './format';
+import { messageDirection, messageKey } from './collaboration-message';
+
 
 type Navigate = (sessionId: string, turnId: string) => void;
 type Filter = 'all' | 'received' | 'sent';
 
-function MessageCard({ message, selectedId, labels, onNavigate }: {
-  message: CollaborationRecord; selectedId?: string; labels: ReadonlyMap<string, string>; onNavigate: Navigate;
-}) {
-  const direction = messageDirection(message, selectedId);
-  const sender = participantLabel(message.senderId, message.sender, labels);
-  const recipient = participantLabel(message.recipientId, message.taskName, labels);
-  const route = direction === 'received' ? `来自 ${sender}` : direction === 'sent' ? `发给 ${recipient}` : direction === 'self' ? '发给自己' : `${sender} → ${recipient}`;
-  const DirectionIcon = direction === 'received' ? ArrowDownLeft : direction === 'sent' ? ArrowUpRight : direction === 'self' ? Repeat2 : ArrowRight;
-  return <article className={`collab-message ${direction}`}>
-    <details className="collab-message-disclosure">
-      <summary>
-        <span className="collab-message-heading"><strong title={route}><DirectionIcon size={14} aria-hidden="true" />{route}</strong><time dateTime={message.timestamp || undefined} title={message.timestamp || undefined}>{message.timestamp ? `${dateGroup(message.timestamp)} ${clock(message.timestamp)}` : '时间未记录'}</time></span>
-        <span className="collab-message-preview">{message.preview || '这条消息未记录正文。'}</span>
-        <span className="collab-message-meta"><span>{messageTypeLabel(message.messageType, direction)}</span><span className="collab-preview-toggle"><span className="when-closed">展开预览</span><span className="when-open">收起预览</span><ChevronDown size={12} aria-hidden="true" /></span></span>
-      </summary>
-      <dl className="collab-message-paths"><dt>发送者</dt><dd>{message.sender || '未记录'}{!message.senderId && '（未关联）'}</dd><dt>接收任务</dt><dd>{message.taskName || '未记录'}{!message.recipientId && '（未关联）'}</dd></dl>
-      {(message.preview.length >= 200 || message.preview.endsWith('…')) && <p className="collab-preview-note">此处仅为日志预览，完整内容请查看原文。</p>}
-    </details>
-    <button type="button" className="text-button collab-view-source" onClick={() => onNavigate(message.sessionId, message.turnId)}>查看原文<ArrowUpRight size={12} aria-hidden="true" /></button>
-  </article>;
-}
-
-export function CollaborationMessages({ messages, selectedId, labels, focused = [], onClearFocus, onNavigate, emptyText }: {
-  messages: CollaborationRecord[]; selectedId?: string; labels: ReadonlyMap<string, string>; focused?: CollaborationRecord[];
+export function CollaborationMessages({ messages, selectedId, labels, revisions, focused = [], onClearFocus, onNavigate, emptyText }: {
+  messages: CollaborationRecord[]; selectedId?: string; labels: ReadonlyMap<string, string>; revisions: ReadonlyMap<string, string>; focused?: CollaborationRecord[];
   onClearFocus?: () => void; onNavigate: Navigate; emptyText?: string;
 }) {
   const [filter, setFilter] = useState<Filter>('all');
@@ -53,6 +31,6 @@ export function CollaborationMessages({ messages, selectedId, labels, focused = 
     </>}
     {start > 0 && <button className="text-button collab-earlier-messages" type="button" onClick={() => setVisibleCount(count => count + 12)}>显示更早消息（还有 {start} 条）</button>}
     {filtered.length === 0 && <p className="collab-empty">{filter === 'all' ? emptyText || '没有可展示的消息。' : `已载入记录中没有${filter === 'received' ? '收到' : '发出'}的消息。`}</p>}
-    <ol className="collab-messages">{filtered.slice(start).map(message => <li key={messageKey(message)} className={focusing ? 'highlighted' : undefined} data-message-key={messageKey(message)}><MessageCard message={message} selectedId={selectedId} labels={labels} onNavigate={onNavigate} /></li>)}</ol>
+    <ol className="collab-messages">{filtered.slice(start).map(message => <li key={messageKey(message)} className={focusing ? 'highlighted' : undefined} data-message-key={messageKey(message)}><CollaborationMessageCard message={message} labels={labels} revision={revisions.get(message.sessionId)} showDate onNavigate={() => onNavigate(message.sessionId, message.turnId)} /></li>)}</ol>
   </section>;
 }

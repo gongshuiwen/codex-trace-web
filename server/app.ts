@@ -2,9 +2,9 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { access, realpath, stat } from 'node:fs/promises';
-import type { AppSettings, ContextCategory, LiveEvent } from '../shared/types.js';
+import type { AppSettings, ContextCategory, LiveEvent, ToolCall, ToolSearchMatch } from '../shared/types.js';
 import type { IndexService } from './indexer.js';
-import { loadTurnDetail, loadToolOutput } from './parser.js';
+import { loadTurnDetail, loadToolOutput, loadToolFailures, loadCompactions } from './parser.js';
 import { ContextAnalysisService } from './context-service.js';
 
 interface AppOptions {
@@ -13,6 +13,75 @@ interface AppOptions {
   saveSettings?: (settings: AppSettings) => Promise<void>;
   clientDir?: string;
   logger?: boolean;
+}
+
+/** Include overlapping literal matches, mapping lowercase expansions back to original UTF-16 spans. */
+function* literalMatches(text: string, needle: string): Generator<{ offset: number; length: number }> {
+  if (!needle) return;
+  const folded = text.toLowerCase();
+  let position = folded.indexOf(needle);
+  if (position < 0) return;
+  if (folded.length === text.length) {
+    while (position >= 0) {
+      yield { offset: position, length: needle.length };
+      position = folded.indexOf(needle, position + 1);
+    }
+    return;
+  }
+
+  // Starts and ends advance independently so overlapping matches can share source characters.
+  const sourceBoundary = (end: boolean) => {
+    let sourceOffset = 0;
+    let foldedOffset = 0;
+    return (position: number): number => {
+      while (sourceOffset < text.length) {
+        const point = String.fromCodePoint(text.codePointAt(sourceOffset)!);
+        const foldedLength = point.toLowerCase().length;
+        const next = foldedOffset + foldedLength;
+        if (position < next) {
+          return sourceOffset + (foldedLength === point.length ? position - foldedOffset : end && position > foldedOffset ? point.length : 0);
+        }
+        sourceOffset += point.length;
+        foldedOffset = next;
+      }
+      return sourceOffset;
+    };
+  };
+  const sourceStart = sourceBoundary(false);
+  const sourceEnd = sourceBoundary(true);
+  let previousOffset = -1;
+  let previousLength = 0;
+  while (position >= 0) {
+    const offset = sourceStart(position);
+    const length = sourceEnd(position + needle.length) - offset;
+    if (offset !== previousOffset || length !== previousLength) {
+      yield { offset, length };
+      previousOffset = offset; previousLength = length;
+    }
+    position = folded.indexOf(needle, position + 1);
+  }
+}
+
+function matchExcerpt(text: string, match: { offset: number; length: number }): { text: string; excerptOffset: number } {
+  let start = Math.max(0, match.offset - 70);
+  let end = Math.min(text.length, match.offset + match.length + 160);
+  // Keep the excerpt readable when a context boundary falls inside an emoji or another surrogate pair.
+  if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start]!)) start--;
+  if (end < text.length && /[\uDC00-\uDFFF]/.test(text[end]!)) end++;
+  return { text: text.slice(start, end), excerptOffset: start };
+}
+
+async function completeToolOutput(file: string, tool: ToolCall): Promise<string> {
+  if (!tool.outputTruncated) return tool.output;
+  const parts = [tool.output];
+  let offset = tool.output.length;
+  while (true) {
+    const page = await loadToolOutput(file, tool.id, offset, 65536);
+    parts.push(page.text);
+    if (page.nextOffset === null || page.nextOffset <= offset) break;
+    offset = page.nextOffset;
+  }
+  return parts.join('');
 }
 
 export async function createApp(options: AppOptions) {
@@ -181,6 +250,24 @@ export async function createApp(options: AppOptions) {
     },
   );
 
+  app.get<{ Params: { id: string }; Querystring: { offset?: number; limit?: number } }>(
+    '/api/sessions/:id/compactions', {
+      schema: { querystring: { type: 'object', properties: {
+        offset: { type: 'integer', minimum: 0, default: 0 },
+        limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+      } } },
+    }, async request => loadCompactions(await sessionPath(request.params.id), request.query.offset ?? 0, request.query.limit ?? 20),
+  );
+
+  app.get<{ Params: { id: string }; Querystring: { offset?: number; limit?: number } }>(
+    '/api/sessions/:id/tools/failures', {
+      schema: { querystring: { type: 'object', properties: {
+        offset: { type: 'integer', minimum: 0, default: 0 },
+        limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+      } } },
+    }, async request => loadToolFailures(await sessionPath(request.params.id), request.query.offset ?? 0, request.query.limit ?? 20),
+  );
+
   app.get<{ Params: { id: string; callId: string }; Querystring: { offset?: number; limit?: number } }>(
     '/api/sessions/:id/tools/:callId/output', {
       schema: { querystring: { type: 'object', properties: {
@@ -199,31 +286,21 @@ export async function createApp(options: AppOptions) {
     const session = await index.get(request.params.id);
     if (!session) throw Object.assign(new Error('未找到此会话。'), { statusCode: 404 });
     const file = await sessionPath(request.params.id);
-    const needle = request.query.query.toLocaleLowerCase();
-    const matches: { turnId: string; eventId: string; text: string }[] = [];
+    const needle = request.query.query.toLowerCase();
+    const matches: ToolSearchMatch[] = [];
     for (const turn of session.turns) {
       const detail = await loadTurnDetail(file, turn.id);
       for (const event of detail.events) {
-        const fields = [event.text, event.tool?.name || '', event.tool?.arguments || ''];
-        if (event.tool && !fields.some((text) => text.toLocaleLowerCase().includes(needle))) {
-          let offset = 0;
-          let tail = '';
-          while (true) {
-            const page = await loadToolOutput(file, event.tool.id, offset, 65536);
-            fields.push(tail + page.text);
-            const found = fields.at(-1)!.toLocaleLowerCase().indexOf(needle);
-            if (found >= 0) break;
-            fields.pop();
-            tail = page.text.slice(-Math.max(needle.length - 1, 0));
-            if (page.nextOffset === null) break;
-            offset = page.nextOffset;
+        if (!event.tool) continue;
+        const tool = event.tool;
+        for (const field of ['arguments', 'output'] as const) {
+          const text = field === 'arguments' ? tool.arguments : await completeToolOutput(file, tool);
+          for (const match of literalMatches(text, needle)) {
+            // Probe one more occurrence before claiming that the first 100 were truncated.
+            if (matches.length === 100) return { matches, truncated: true };
+            matches.push({ turnId: turn.id, eventId: event.id, toolId: tool.id, toolName: tool.name,
+              field, ...match, matchedText: text.slice(match.offset, match.offset + match.length), ...matchExcerpt(text, match) });
           }
-        }
-        const field = fields.find((text) => text.toLocaleLowerCase().includes(needle));
-        if (field) {
-          const position = field.toLocaleLowerCase().indexOf(needle);
-          matches.push({ turnId: turn.id, eventId: event.id, text: field.slice(Math.max(0, position - 70), position + needle.length + 160) });
-          if (matches.length >= 100) return { matches, truncated: true };
         }
       }
     }

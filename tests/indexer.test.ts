@@ -1,5 +1,6 @@
-import { mkdtemp, mkdir, rm, writeFile, appendFile, realpath, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, appendFile, realpath, readdir, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -120,6 +121,89 @@ describe('persistent searchable summaries', () => {
 });
 
 describe('background index service', () => {
+  test('rebuilds failure counts from unchanged logs instead of trusting a pre-statistics cache', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'session-lens-failure-cache-'));
+    const logs = path.join(root, 'sessions');
+    const cache = path.join(root, 'cache');
+    await mkdir(logs);
+    await mkdir(cache);
+    const file = path.join(logs, 'rollout-failure.jsonl');
+    const records = log('failure-cache', 'check failure counts').trim().split('\n').map(line => JSON.parse(line));
+    records.splice(3, 0,
+      { type: 'response_item', timestamp: '2026-11-03T01:00:00Z', payload: { type: 'function_call', call_id: 'failed', name: 'exec_command', arguments: '{}' } },
+      { type: 'response_item', timestamp: '2026-11-03T01:00:01Z', payload: { type: 'function_call_output', call_id: 'failed', output: '{"exit_code":2}' } });
+    records.push({ type: 'compacted', timestamp: '2026-11-03T01:00:02Z', payload: { turn_id: 'turn-1' } });
+    await writeFile(file, records.map(record => JSON.stringify(record)).join('\n') + '\n');
+    const canonical = await realpath(logs);
+    const hash = createHash('sha256').update(process.platform === 'win32' ? canonical.toLowerCase() : canonical).digest('hex').slice(0, 20);
+    const obsolete = path.join(cache, `index-v${INDEX_SCHEMA_VERSION - 1}-${hash}.sqlite`);
+    const old = new SessionStore(obsolete);
+    const metadata = await stat(file);
+    const oldSummary = data('failure-cache', 'check failure counts');
+    oldSummary.session.toolCount = 1;
+    oldSummary.turns[0].toolCount = 1;
+    old.upsert(oldSummary, file, metadata.size, metadata.mtimeMs);
+    old.close();
+    const obsoleteDatabase = new DatabaseSync(obsolete);
+    obsoleteDatabase.exec(`UPDATE schema_version SET version = ${INDEX_SCHEMA_VERSION - 1}`);
+    obsoleteDatabase.close();
+    const index = new IndexService({ sessionsDir: logs, dataDir: cache });
+    try {
+      await index.start();
+      await eventually(() => index.list(), result => result.progress.status === 'ready' && result.total === 1);
+      expect((await index.get('failure-cache'))?.session).toMatchObject({ toolCount: 1, toolFailureCount: 1, compactionCount: 1 });
+      expect((await index.get('failure-cache'))?.session.durationMs).toBeGreaterThan(0);
+      expect((await readdir(cache)).some(name => name === `index-v${INDEX_SCHEMA_VERSION}-${hash}.sqlite`)).toBe(true);
+      expect(index.progress.errors).toBe(0);
+    } finally {
+      await index.stop();
+      if (!path.resolve(root).startsWith(path.join(tmpdir(), 'session-lens-failure-cache-'))) throw new Error('Unexpected cleanup target');
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  test('persists final failure counts and emits session changes as appended output fails and recovers', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'session-lens-failure-live-'));
+    const logs = path.join(root, 'sessions');
+    await mkdir(logs);
+    const file = path.join(logs, 'rollout-live.jsonl');
+    const records = log('failure-live', 'observe tool status').trim().split('\n').map(line => JSON.parse(line));
+    records.splice(3, 0,
+      { type: 'response_item', timestamp: '2026-11-03T01:00:00Z', payload: { type: 'function_call', call_id: 'live', name: 'exec_command', arguments: '{}' } },
+      { type: 'response_item', timestamp: '2026-11-03T01:00:01Z', payload: { type: 'function_call_output', call_id: 'live', output: '{"exit_code":0}' } });
+    await writeFile(file, records.map(record => JSON.stringify(record)).join('\n') + '\n');
+    const index = new IndexService({ sessionsDir: logs, dataDir: path.join(root, 'cache') });
+    let changes = 0;
+    index.on('change', event => { if (event.type === 'session-changed' && event.sessionId === 'failure-live') changes++; });
+    try {
+      await index.start();
+      await eventually(() => index.get('failure-live'), result => result?.session.toolFailureCount === 0);
+      const initialChanges = changes;
+      const update = (output: string) => JSON.stringify({ type: 'response_item', timestamp: '2026-11-03T01:00:02Z', payload: { type: 'function_call_output', call_id: 'live', output } }) + '\n';
+      await appendFile(file, update('{"exit_code":2}'));
+      await eventually(() => index.get('failure-live'), result => result?.session.toolFailureCount === 1);
+      expect(changes).toBeGreaterThan(initialChanges);
+      expect((await index.get('failure-live'))?.session.toolCount).toBe(1);
+      const beforeCompaction = changes;
+      await appendFile(file, JSON.stringify({ type: 'compacted', timestamp: '2026-11-03T01:00:05Z', payload: { turn_id: 'turn-1' } }) + '\n');
+      await eventually(() => index.get('failure-live'), result => result?.session.compactionCount === 1);
+      expect((await index.get('failure-live'))?.session.durationMs).toBe(86405000);
+      expect(changes).toBeGreaterThan(beforeCompaction);
+      await index.stop();
+      await index.start();
+      await eventually(() => index.list(), result => result.progress.status === 'ready');
+      expect((await index.get('failure-live'))?.session.toolFailureCount).toBe(1);
+      expect((await index.get('failure-live'))?.session).toMatchObject({ compactionCount: 1, durationMs: 86405000 });
+      await appendFile(file, update('{"exit_code":0}'));
+      await eventually(() => index.get('failure-live'), result => result?.session.toolFailureCount === 0);
+      expect((await index.get('failure-live'))?.session.toolCount).toBe(1);
+    } finally {
+      await index.stop();
+      if (!path.resolve(root).startsWith(path.join(tmpdir(), 'session-lens-failure-live-'))) throw new Error('Unexpected cleanup target');
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30000);
+
   test('rebuilds past the old cache namespace and keeps parent/child identity separate after replay', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'session-lens-lineage-'));
     const logs = path.join(root, 'sessions');

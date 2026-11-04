@@ -142,6 +142,7 @@ export function CollaborationView({ session, activity, onSelectSession, onNaviga
     return messages.filter(message => keys.has(messageKey(message)));
   }, [messages, focusedKeys]);
   const labels = useMemo(() => createParticipantLabels(sessions), [sessions]);
+  const revisions = useMemo(() => new Map(entries.map(entry => [entry.detail.session.id, entry.detail.session.revision])), [entries]);
   const selected = tree.byId.get(selectedId)?.session ?? session.session;
   const selectedEntry = entries.find(entry => entry.detail.session.id === selected.id);
   const related = messages.filter(message => message.senderId === selected.id || message.recipientId === selected.id);
@@ -205,11 +206,11 @@ export function CollaborationView({ session, activity, onSelectSession, onNaviga
           {selected.id !== session.session.id && <button className="text-button collab-open-session" type="button" onClick={() => onSelectSession(selected)}>打开会话<ArrowUpRight size={13} /></button>}
           {loading.has(selected.id) && <p className="turn-loading" role="status"><LoaderCircle size={14} className="spin" />正在读取此代理…</p>}
           {errors.has(selected.id) && <p className="inline-error" role="alert">{errors.get(selected.id)}<button type="button" onClick={() => load(selected.id)}>重试</button></p>}
-          <CollaborationMessages key={`messages-${selected.id}`} messages={related} selectedId={selected.id} labels={labels} focused={focusedMessages} onClearFocus={() => setFocusedKeys([])} onNavigate={navigate} emptyText={selectedEntry ? '已读取日志中没有可关联到此代理的消息。' : '正在读取此代理的协作记录。'} />
+          <CollaborationMessages key={`messages-${selected.id}`} messages={related} selectedId={selected.id} labels={labels} revisions={revisions} focused={focusedMessages} onClearFocus={() => setFocusedKeys([])} onNavigate={navigate} emptyText={selectedEntry ? '已读取日志中没有可关联到此代理的消息。' : '正在读取此代理的协作记录。'} />
         </aside>
       </div>
       <div className="collab-footer"><span>仅关联明确的任务路径 · 各会话用量独立</span><span>轮次完成不代表代理结束</span></div>
     </div>
-    <details className="collab-unlinked"><summary>未关联消息 <span>{unlinked.length} 条</span></summary><p className="collab-note">至少一端尚未匹配到已载入会话。展开预览可查看原始任务路径，“查看原文”可定位来源轮次。</p><CollaborationMessages messages={unlinked} labels={labels} onNavigate={navigate} /></details>
+    <details className="collab-unlinked"><summary>未关联消息 <span>{unlinked.length} 条</span></summary><p className="collab-note">至少一端尚未匹配到已载入会话。展开全文可阅读完整消息和原始任务路径，“查看来源轮次”可定位原始记录。</p><CollaborationMessages messages={unlinked} labels={labels} revisions={revisions} onNavigate={navigate} /></details>
   </section>;
 }

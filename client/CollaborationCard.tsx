@@ -1,36 +1,94 @@
-import { useState } from 'react';
-import { ChevronRight, UsersRound } from 'lucide-react';
+import { useEffect, useId, useState } from 'react';
+import { ArrowUpRight, ChevronDown, ChevronRight, LoaderCircle, UsersRound } from 'lucide-react';
 import type { TimelineEvent } from '../shared/types';
-import { clock, collaborationTypeLabels } from './format';
+import type { CollaborationRecord } from './collaboration-data';
+import { messageRoute, messageTypeLabel } from './collaboration-message';
+import { loadCollaborationDetail } from './collaboration-detail';
+import { errorMessage, isAbort } from './api';
+import { clock, dateGroup } from './format';
 import { Markdown } from './Markdown';
+import { eventViewState } from './event-view-state';
 import './collaboration.css';
 
-export function CollaborationCard({ event }: { event: TimelineEvent }) {
-  const [open, setOpen] = useState(false);
+interface MessageContent { payload: string; raw: string }
+const emptyLabels: ReadonlyMap<string, string> = new Map();
+
+export function CollaborationMessageCard({ message, labels, content, revision = '', showDate = false, preserveLayout, onNavigate }: {
+  message: CollaborationRecord; labels: ReadonlyMap<string, string>; content?: MessageContent; revision?: string; showDate?: boolean;
+  preserveLayout?: (change: () => void) => void; onNavigate?: () => void;
+}) {
+  const stateKey = `collaboration:${message.id}`;
+  const [open, setOpen] = useState(() => eventViewState.get(message.sessionId, stateKey) ?? false);
   const [rawOpen, setRawOpen] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [loaded, setLoaded] = useState<{ key: string; data?: MessageContent; error?: string } | null>(null);
+  const bodyId = useId();
+  const loadKey = JSON.stringify([message.sessionId, message.turnId, message.id, revision, message.messageType, message.sender, message.taskName, retry]);
+  const current = loaded?.key === loadKey ? loaded : null;
+  const body = content ?? current?.data;
+  const loading = open && !body && !current?.error;
+  const route = messageRoute(message, labels);
+  const result = message.messageType === 'FINAL_ANSWER';
+  const preview = message.preview.replace(/^#{1,6}\s+/gm, '').replace(/\s+/g, ' ').trim();
+  const hasTime = !!message.timestamp && Number.isFinite(Date.parse(message.timestamp));
+
+  useEffect(() => {
+    if (!open || content) return;
+    const controller = new AbortController();
+    loadCollaborationDetail(message, revision, controller.signal).then(data => {
+      if (!controller.signal.aborted) setLoaded({ key: loadKey, data });
+    }).catch(error => {
+      if (!controller.signal.aborted && !isAbort(error)) setLoaded({ key: loadKey, error: errorMessage(error) });
+    });
+    return () => controller.abort();
+  }, [open, content, loadKey, message.sessionId, message.turnId, message.id, message.messageType, message.sender, message.taskName, revision]);
+
+  function toggle() {
+    const change = () => {
+      const next = !open;
+      eventViewState.set(message.sessionId, stateKey, next); setOpen(next);
+      if (!next) setRawOpen(false);
+    };
+    if (preserveLayout) preserveLayout(change); else change();
+  }
+  function toggleRaw() {
+    const change = () => setRawOpen(value => !value);
+    if (preserveLayout) preserveLayout(change); else change();
+  }
+
+  return <article className={`collaboration-card ${result ? 'collaboration-result' : ''}`} data-collaboration-id={message.id} data-source-session-id={message.sessionId}>
+    <button type="button" className="collaboration-toggle" aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
+      <span className="collaboration-heading">
+        {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+        <UsersRound size={16} aria-hidden="true" />
+        <strong className="collaboration-route" title={`${message.sender} → ${message.taskName}`}>{route}</strong>
+        <span className="collaboration-badge">{messageTypeLabel(message.messageType, 'unknown')}</span>
+      </span>
+      {!open && <span className="collaboration-preview">{preview || '这条消息未记录正文。'}</span>}
+      <span className="collaboration-toggle-footer"><span>{open ? '收起全文' : '展开全文'}</span><time dateTime={hasTime ? message.timestamp : undefined} title={message.timestamp || undefined}>{hasTime ? `${showDate ? `${dateGroup(message.timestamp)} ` : ''}${clock(message.timestamp)}` : '时间未记录'}</time></span>
+    </button>
+    <div id={bodyId} className="collaboration-body" hidden={!open} aria-busy={loading || undefined}>
+      {open && <>
+        {loading && <p className="collaboration-loading" role="status"><LoaderCircle size={14} className="spin" />正在读取完整消息…</p>}
+        {current?.error && <p className="inline-error" role="alert">{current.error}<button type="button" onClick={() => setRetry(value => value + 1)}>重试</button></p>}
+        {body && (body.payload.trim() ? <Markdown text={body.payload} /> : <p className="collaboration-empty">这条日志未记录正文。</p>)}
+        <dl className="collaboration-paths"><dt>发送方</dt><dd>{message.sender || '未记录'}</dd><dt>接收方</dt><dd>{message.taskName || '未记录'}</dd></dl>
+        {body && <div className="collaboration-raw">
+          <button type="button" className="collaboration-raw-toggle" aria-expanded={rawOpen} aria-controls={`${bodyId}-raw`} onClick={toggleRaw}>{rawOpen ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}查看原始日志消息</button>
+          <div id={`${bodyId}-raw`} hidden={!rawOpen}>{rawOpen && <pre tabIndex={0} aria-label="原始协作日志">{body.raw}</pre>}</div>
+        </div>}
+      </>}
+    </div>
+    {onNavigate && <div className="collaboration-actions"><button type="button" className="text-button" onClick={onNavigate}>查看来源轮次<ArrowUpRight size={12} aria-hidden="true" /></button></div>}
+  </article>;
+}
+
+export function CollaborationCard({ event, sessionId, record, labels = emptyLabels, preserveLayout }: {
+  event: TimelineEvent; sessionId: string; record?: CollaborationRecord; labels?: ReadonlyMap<string, string>;
+  preserveLayout?: (change: () => void) => void;
+}) {
   const message = event.collaboration;
   if (!message) return null;
-  const sender = message.sender.split('/').filter(Boolean).at(-1) || message.sender;
-  const label = collaborationTypeLabels[message.messageType];
-
-  return <details className="collaboration-card group/collaboration my-3 min-w-0 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel)] text-[var(--text)]" onToggle={event => {
-    setOpen(event.currentTarget.open);
-    if (!event.currentTarget.open) setRawOpen(false);
-  }}>
-    <summary className="grid min-h-[68px] min-w-0 cursor-pointer list-none grid-cols-[14px_16px_minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center gap-x-2 gap-y-0.5 px-3 py-2.5 hover:bg-[var(--hover)] focus-visible:rounded-md focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-[var(--accent)] sm:flex sm:gap-2.5">
-      <ChevronRight size={14} className="collaboration-chevron row-span-2 text-[var(--muted)] group-open/collaboration:rotate-90" />
-      <UsersRound size={16} className="collaboration-icon row-span-2 text-[var(--muted)]" />
-      <span className="collaboration-sender col-start-3 row-span-2 flex min-w-0 flex-1 flex-col gap-0.5"><strong className="truncate text-[14px] leading-5 font-semibold">{sender}</strong><small className="truncate font-mono text-[12px] leading-[18px] text-[var(--muted)]" title={message.sender}>{message.sender}</small></span>
-      <span className={`collaboration-badge col-start-4 row-start-1 self-end rounded border px-1.5 py-0.5 text-[12px] leading-4 whitespace-nowrap sm:self-auto ${message.messageType === 'FINAL_ANSWER' ? 'final border-transparent bg-[var(--accent-light)] text-[var(--accent-strong)]' : 'border-[var(--border)] text-[var(--soft)]'}`}>{label}</span>
-      <time className="col-start-4 row-start-2 self-start text-right text-[12px] leading-4 whitespace-nowrap text-[var(--muted)] tabular-nums sm:self-auto" dateTime={event.timestamp}>{clock(event.timestamp)}</time>
-    </summary>
-    {open && <div className="collaboration-body border-t border-[var(--border)] p-3 text-[14px] leading-[1.8] [overflow-wrap:anywhere] sm:p-4">
-      <div className="collaboration-recipient mb-3 flex items-baseline gap-2 text-[12px] text-[var(--muted)]"><span>接收任务</span><code className="font-mono text-[12px] [overflow-wrap:anywhere]">{message.taskName}</code></div>
-      {message.payload.trim() ? <Markdown text={message.payload} /> : <p className="collaboration-empty m-0 text-[14px] text-[var(--muted)]">这条日志未记录正文。</p>}
-      <details className="collaboration-raw mt-4 text-[12px] text-[var(--muted)]" onToggle={event => setRawOpen(event.currentTarget.open)}>
-        <summary className="min-h-11 cursor-pointer py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">查看原始日志消息</summary>
-        {rawOpen && <pre className="mt-2 max-h-80 overflow-auto rounded-md border border-[var(--border)] bg-[var(--code)] p-3 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-[var(--soft)] [overflow-wrap:anywhere]">{event.text}</pre>}
-      </details>
-    </div>}
-  </details>;
+  const source = record ?? { ...message, id: event.id, sessionId, turnId: '', timestamp: event.timestamp, preview: message.payload.slice(0, 400) };
+  return <CollaborationMessageCard message={source} labels={labels} content={{ payload: message.payload, raw: event.text }} preserveLayout={preserveLayout} />;
 }

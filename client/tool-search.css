@@ -1,0 +1,40 @@
+.tool-search-panel { display:flex; flex:none; flex-direction:column; min-height:0; max-height:min(320px,45dvh); gap:8px; padding:12px var(--canvas-pad); border-bottom:1px solid var(--border); background:var(--panel); }
+.tool-search-panel>form { display:flex; flex:none; align-items:center; gap:8px; }
+.tool-search-panel>form>svg { flex:none; color:var(--muted); }
+.tool-search-panel input { flex:1; min-width:0; min-height:var(--control-height); padding:0 12px; border:1px solid var(--control); border-radius:6px; background:var(--bg); color:var(--text); font-size:14px; }
+.tool-search-panel button[type=submit] { flex:none; min-height:var(--control-height); padding:0 12px; border:0; border-radius:6px; background:var(--primary); color:var(--on-primary); font-size:12px; }
+.tool-search-panel button[type=submit]:disabled { opacity:.6; }
+.tool-search-feedback { display:flex; flex:none; align-items:center; justify-content:space-between; gap:8px 16px; }
+.tool-search-summary { display:flex; align-items:center; gap:6px; min-width:0; margin:0; color:var(--muted); font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.tool-search-summary>svg { flex:none; }
+.tool-search-navigation { display:flex; flex:none; align-items:center; gap:4px; }
+.tool-search-position { min-width:52px; margin-right:4px; color:var(--muted); font-size:12px; text-align:center; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.tool-search-navigation button { display:inline-flex; align-items:center; justify-content:center; gap:4px; min-width:32px; min-height:32px; padding:4px 6px; border:1px solid var(--border); border-radius:5px; background:transparent; color:var(--soft); font-size:12px; white-space:nowrap; }
+.tool-search-navigation button:hover:not(:disabled) { background:var(--hover); color:var(--accent-strong); }
+.tool-search-navigation button:disabled { opacity:.4; cursor:default; }
+.tool-search-results-list { min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+.session-refresh-error { display:flex; align-items:center; flex:none; gap:12px; padding:4px var(--canvas-pad); background:var(--panel); color:var(--danger); font-size:12px; }
+.session-refresh-error>span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.tool-search-results-list>button { display:flex; align-items:center; gap:12px; width:100%; min-width:0; padding:9px 8px; border:0; border-top:1px solid var(--border); border-radius:4px; background:transparent; text-align:left; font-size:12px; color:var(--soft); }
+.tool-search-results-list>button:hover:not(:disabled) { background:var(--hover); color:var(--accent-strong); }
+.tool-search-results-list>button[aria-current=true] { background:var(--accent-light); box-shadow:inset 2px 0 var(--accent); }
+.tool-search-results-list>button:disabled { opacity:.65; cursor:default; }
+.tool-search-results-list>button:focus-visible { outline-offset:-2px; }
+.tool-search-results-list>button>svg { flex:none; }
+.tool-search-result-meta { flex:none; color:var(--muted); font-variant-numeric:tabular-nums; }
+.tool-search-result-content { display:grid; flex:1; min-width:0; gap:3px; }
+.tool-search-result-content>strong { font-weight:500; color:var(--soft); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.tool-search-result-content>span { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; color:var(--muted); line-height:1.6; overflow-wrap:anywhere; }
+.tool-search-result-content mark { border-radius:2px; background:var(--accent-light); color:var(--text); font-weight:600; text-decoration:underline; text-decoration-color:var(--accent); text-underline-offset:2px; }
+.tool-search-drawer-navigation { display:flex; flex:none; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 12px; padding:8px 24px; border-bottom:1px solid var(--border); color:var(--muted); font-size:12px; }
+.tool-search-drawer-navigation>span { font-variant-numeric:tabular-nums; }
+@media(max-width:600px) {
+  .tool-search-panel { max-height:42dvh; }
+  .tool-search-feedback { flex-wrap:wrap; gap:4px; }
+  .tool-search-navigation { margin-left:auto; }
+  .tool-search-navigation button { min-width:44px; min-height:44px; }
+  .tool-search-results-list>button { flex-wrap:wrap; gap:5px 10px; }
+  .tool-search-result-meta { order:-1; width:100%; }
+  .tool-search-result-content { width:calc(100% - 28px); }
+  .tool-search-drawer-navigation { padding:6px 20px; }
+}

@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ContextEvents } from '../client/TimelineEvents';
+import { ContextEvents, EventDisclosure } from '../client/TimelineEvents';
 import { createEventViewStateStore, eventViewState } from '../client/event-view-state';
 
 function fakeStorage() {
@@ -94,5 +94,13 @@ describe('event disclosure choices', () => {
     expect(renderToStaticMarkup(createElement(ContextEvents, props)).match(/aria-expanded="true"/g)).toHaveLength(2);
   });
 
-
+  it('restores a reasoning disclosure after remount without affecting another session', () => {
+    const event = { id: 'reasoning-record', kind: 'reasoning' as const, text: 'Stored reasoning body', timestamp: '2026-11-03T00:00:00Z' };
+    eventViewState.set('reasoning-rendering', `disclosure:${event.id}`, true);
+    const expanded = renderToStaticMarkup(createElement(EventDisclosure, { sessionId: 'reasoning-rendering', event }));
+    const untouched = renderToStaticMarkup(createElement(EventDisclosure, { sessionId: 'different-session', event }));
+    expect(expanded).toContain('aria-expanded="true"');
+    expect(expanded).toContain('event-disclosure-body');
+    expect(untouched).toContain('aria-expanded="false"');
+  });
 });

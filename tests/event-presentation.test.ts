@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TimelineEvent } from '../shared/types';
 import { contextPresentation, groupAdjacentContexts } from '../client/event-presentation';
+import { groupAdjacentTools } from '../client/tool-groups';
 
 function event(id: string, kind: TimelineEvent['kind'] = 'context', text = id): TimelineEvent {
   return { id, kind, text, timestamp: '2026-11-03T00:00:00Z' };
@@ -28,7 +29,16 @@ describe('context event grouping', () => {
     expect(groupAdjacentContexts([])).toEqual([]);
   });
 
-
+  it('preserves tool groups when context grouping follows tool grouping', () => {
+    const tools: TimelineEvent[] = ['one', 'two'].map(id => ({ ...event(id, 'tool'), tool: {
+      id, name: 'shell', category: 'command', arguments: '', output: '', outputLength: 0,
+      outputTruncated: false, status: 'failed',
+    } }));
+    const toolEntries = groupAdjacentTools([event('before'), ...tools, event('after')]);
+    const grouped = groupAdjacentContexts(toolEntries);
+    expect(grouped.map(entry => entry.kind)).toEqual(['context-group', 'tool-group', 'context-group']);
+    expect(grouped[1]).toBe(toolEntries[1]);
+  });
 });
 
 describe('context event presentation', () => {

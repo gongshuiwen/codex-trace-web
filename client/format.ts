@@ -1,7 +1,7 @@
 import type { CollaborationMessage, SessionSummary } from '../shared/types';
 
 export const collaborationTypeLabels: Record<CollaborationMessage['messageType'], string> = {
-  NEW_TASK: '新任务', MESSAGE: '协作消息', FINAL_ANSWER: '最终答复',
+  NEW_TASK: '任务分派', MESSAGE: '协作消息', FINAL_ANSWER: '结果汇报',
 };
 
 export function sessionDisplayName(session: Pick<SessionSummary, 'agentName' | 'title' | 'project'>): string {

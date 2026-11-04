@@ -1,7 +1,9 @@
 import { useId, useState } from 'react';
-import { ChevronDown, ChevronRight, Layers3 } from 'lucide-react';
+import { BrainCircuit, ChevronDown, ChevronRight, FileJson2, Layers3, MessageSquareText } from 'lucide-react';
 import type { TimelineEvent } from '../shared/types';
 import { contextPresentation, type ContextGroup } from './event-presentation';
+import { clock } from './format';
+import { Markdown } from './Markdown';
 import { eventViewState } from './event-view-state';
 import './timeline-events.css';
 
@@ -51,5 +53,38 @@ export function ContextEvents({ group, sessionId, preserveLayout }: { group: Con
     <div id={bodyId} className="context-group-body" hidden={!open}>
       {open && group.events.map(event => <ContextSource key={event.id} event={event} sessionId={sessionId} preserveLayout={preserveLayout} />)}
     </div>
+  </section>;
+}
+
+export function EventDisclosure({ event, sessionId, preserveLayout }: { event: TimelineEvent; sessionId: string } & LayoutChange) {
+  const { open, bodyId, toggle } = useDisclosure(sessionId, `disclosure:${event.id}`, preserveLayout);
+  const reasoning = event.kind === 'reasoning';
+  const Icon = reasoning ? BrainCircuit : FileJson2;
+  const label = reasoning ? '推理摘要' : '其他日志';
+  const firstLine = event.text.trim().split(/\r?\n/, 1)[0] || '';
+  const preview = (reasoning ? firstLine.replace(/^#{1,6}\s+/, '') : firstLine).slice(0, 100);
+  return <section className={`event-disclosure ${reasoning ? 'reasoning-event' : 'log-event'}`} aria-label={label}>
+    <button type="button" className="event-disclosure-toggle" aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
+      {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+      <Icon size={15} aria-hidden="true" />
+      <span className="event-disclosure-title">{label}</span>
+      <time className="event-time" dateTime={event.timestamp}>{clock(event.timestamp)}</time>
+    </button>
+    {!open && preview && <p className="event-disclosure-preview">{preview}</p>}
+    <div id={bodyId} className="event-disclosure-body" hidden={!open}>
+      {open && (reasoning
+        ? <Markdown text={event.text || '日志没有记录可显示的推理摘要'} />
+        : <pre className="event-raw" tabIndex={0} aria-label="其他日志原文">{event.text || '此日志没有可显示的文本'}</pre>)}
+    </div>
+  </section>;
+}
+
+export function FinalAnswer({ event }: { event: TimelineEvent }) {
+  return <section className="assistant-event final-answer" aria-label="最终答复">
+    <div className="event-content-heading">
+      <MessageSquareText size={16} aria-hidden="true" /><h3>最终答复</h3>
+      <time className="event-time" dateTime={event.timestamp}>{clock(event.timestamp)}</time>
+    </div>
+    <Markdown text={event.text} />
   </section>;
 }

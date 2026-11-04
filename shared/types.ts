@@ -117,6 +117,11 @@ export interface SessionSummary {
   status: 'running' | 'completed' | 'interrupted' | 'unknown';
   turnCount: number;
   toolCount: number;
+  /** Final recorded failures in this session; absent only in legacy external data. */
+  toolFailureCount?: number;
+  /** Elapsed span of this session's recorded timestamps, independent of file modification time. */
+  durationMs?: number | null;
+  compactionCount?: number;
   parentId?: string;
   agentName?: string;
   agentNickname?: string;
@@ -139,6 +144,8 @@ export interface TurnSummary {
   status: SessionSummary['status'];
   model: string;
   toolCount: number;
+  toolFailureCount?: number;
+  compactionCount?: number;
   usage: UsageSummary;
   startOffset: number;
   endOffset: number;
@@ -165,11 +172,61 @@ export interface ToolCall {
   exitCode?: number;
 }
 
+export interface ToolSearchLocation {
+  field: 'arguments' | 'output';
+  /** Offset and length refer to the original field's UTF-16 code units. */
+  offset: number;
+  length: number;
+  query: string;
+  /** Original source span, when available, for validating a location after live updates. */
+  matchedText?: string;
+}
+
+export interface ToolSearchMatch {
+  turnId: string;
+  eventId: string;
+  toolId: string;
+  toolName: string;
+  field: ToolSearchLocation['field'];
+  offset: number;
+  length: number;
+  matchedText: string;
+  text: string;
+  /** UTF-16 offset of the excerpt's start in the original searched field. */
+  excerptOffset?: number;
+}
+
+export interface ToolFailureItem {
+  turnId: string;
+  eventId: string;
+  toolId: string;
+  toolName: string;
+}
+
+export interface ToolFailurePage {
+  items: ToolFailureItem[];
+  total: number;
+  nextOffset: number | null;
+}
+
+export interface CompactionItem {
+  turnId: string;
+  eventId: string;
+  timestamp: string;
+}
+
+export interface CompactionPage {
+  items: CompactionItem[];
+  total: number;
+  nextOffset: number | null;
+}
+
 export interface TimelineEvent {
   id: string;
   kind: TimelineKind;
   timestamp: string;
   text: string;
+  noticeType?: 'compaction';
   tool?: ToolCall;
   collaboration?: CollaborationMessage;
 }
