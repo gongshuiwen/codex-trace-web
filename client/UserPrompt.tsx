@@ -8,11 +8,10 @@ interface UserPromptProps {
   sessionId: string;
   stateKey: string;
   anchorId?: string;
-  indented?: boolean;
   preserveLayout?: (change: () => void) => void;
 }
 
-function PromptBody({ text, sessionId, stateKey, anchorId, indented = false, preserveLayout }: UserPromptProps) {
+function PromptBody({ text, sessionId, stateKey, anchorId, preserveLayout }: UserPromptProps) {
   const [expanded, setExpanded] = useState(() => eventViewState.get(sessionId, stateKey) ?? false);
   const [overflowing, setOverflowing] = useState(false);
   const textRef = useRef<HTMLParagraphElement>(null);
@@ -54,7 +53,7 @@ function PromptBody({ text, sessionId, stateKey, anchorId, indented = false, pre
     if (preserveLayout) preserveLayout(change); else change();
   }
 
-  return <div className={`user-prompt${indented ? ' user-prompt-indented' : ''}`} data-expanded={expanded} data-event-id={anchorId}>
+  return <div className="user-prompt" data-expanded={expanded} data-event-id={anchorId}>
     <p id={bodyId} ref={textRef} className="user-prompt-text">{text || '空消息'}</p>
     {overflowing && <button type="button" className="user-prompt-toggle" aria-expanded={expanded} aria-controls={bodyId} onClick={toggle}>{expanded ? '收起请求' : '展开完整请求'}<ChevronDown size={12} aria-hidden="true" /></button>}
   </div>;

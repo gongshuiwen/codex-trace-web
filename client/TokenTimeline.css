@@ -1,37 +1,80 @@
-/* SVG marks share their colours with the HTML legend. Layout and controls use Tailwind. */
-.token-timeline{--token-output:#6888aa}
-:root[data-theme="dark"] .token-timeline{--token-output:#9ab4c9}
-.token-timeline-controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
-.token-timeline-summary{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin-left:auto}
-.token-record-count{margin:0;color:var(--muted);font-size:12px;line-height:20px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.token-timeline-note{margin-top:16px;color:var(--muted);font-size:12px;line-height:1.8}
-.token-timeline-note>summary{display:flex;align-items:center;gap:6px;width:fit-content;min-height:36px;list-style:none;cursor:pointer}
-.token-timeline-note>summary::-webkit-details-marker{display:none}
-.token-timeline-note>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-.token-timeline-note[open]>summary>svg{transform:rotate(90deg)}
-.token-timeline-note p{margin:0}
-.token-timeline-note p+p{margin-top:6px}
-@media(max-width:560px){.token-timeline-controls{gap:8px}.token-timeline-summary{gap:8px 12px}.token-timeline-note>summary{min-height:44px}}
-.token-series-input{color:var(--accent-strong);stroke:var(--accent-strong)}
-.token-series-output{color:var(--token-output);stroke:var(--token-output)}
-.token-series-cache{color:var(--muted);stroke:var(--muted);stroke-dasharray:4 3}
-.token-timeline-axis line{stroke:var(--border);stroke-width:1}
-.token-timeline-axis text,.token-point-number,.token-timeline-axis-title{fill:var(--muted);font:12px var(--font-sans);font-variant-numeric:tabular-nums}
-.token-series-line{fill:none;stroke-width:1.8;stroke-linejoin:round;pointer-events:none}
-.token-timeline-point{cursor:pointer}
-.token-point-hit{fill:transparent}
-.token-point-mark{fill:var(--accent-strong);stroke:var(--panel);stroke-width:1;pointer-events:none}
-.token-point-mark.token-series-input{fill:var(--accent-strong)}
-.token-point-mark.token-series-output{fill:var(--token-output)}
-.token-point-mark.token-series-cache{fill:var(--muted);stroke-dasharray:none}
-.token-point-cursor{stroke:var(--muted);stroke-width:1;opacity:.4;pointer-events:none}
-.token-point-focus{fill:none;stroke:transparent;stroke-width:2;pointer-events:none}
-.token-timeline-point:hover .token-point-focus,.token-timeline-point:focus-visible .token-point-focus,.token-timeline-point.selected .token-point-focus{stroke:var(--accent)}
-.token-timeline-point:focus{outline:none}
-.token-timeline-snapshot .token-point-mark{fill:var(--panel);stroke:var(--warning);stroke-width:1.8}
-.token-compaction>line{stroke:var(--warning);stroke-width:1;stroke-dasharray:3 4;pointer-events:none}
-.token-compaction rect{fill:var(--panel);stroke:var(--warning)}
-.token-compaction path{fill:none;stroke:var(--warning);stroke-width:1.4;pointer-events:none}
-.token-compaction-action{cursor:pointer}
-.token-compaction-action:hover rect,.token-compaction-action:focus-visible rect{stroke-width:2}
-.token-compaction-action:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+/* One data hue for input; output and its cached subset stay visually distinct
+   through neutral value and line style. Compression is an event, not a slope. */
+.token-timeline { min-width:0; color:var(--text); --token-output:var(--soft); }
+.token-timeline-controls { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.token-timeline-modes { display:flex; flex:none; gap:2px; }
+.token-timeline-modes button { min-height:34px; padding:6px 12px; border:0; border-radius:4px; background:transparent; color:var(--muted); font-size:14px; }
+.token-timeline-modes button:hover { background:var(--hover); color:var(--text); }
+.token-timeline-modes button[aria-pressed=true] { background:var(--hover); color:var(--text); font-weight:600; }
+.token-timeline-summary { display:flex; align-items:center; flex-wrap:wrap; gap:12px 20px; margin-left:auto; }
+.token-record-count { display:flex; gap:16px; margin:0; color:var(--muted); font-size:12px; line-height:20px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.token-metric-control { min-height:34px; max-width:150px; padding:5px 28px 5px 10px; border:1px solid var(--control); border-radius:4px; background:var(--panel); color:var(--soft); font-size:12px; }
+.token-timeline-legend { display:flex; flex-wrap:wrap; gap:8px 20px; margin:24px 0 8px; color:var(--soft); font-size:12px; line-height:20px; }
+.token-timeline-legend > span { display:inline-flex; align-items:center; gap:6px; }
+.token-timeline-legend i { display:inline-block; width:18px; border-top:2px solid currentColor; }
+.token-timeline-legend i.token-series-cache { border-top-style:dashed; }
+.token-compaction-legend,.token-snapshot-legend { color:var(--warning); }
+.token-timeline-scroll { min-width:0; overflow-x:auto; overflow-y:hidden; border-block:1px solid var(--border); background:var(--panel); scrollbar-width:thin; scrollbar-color:var(--control) transparent; }
+.token-timeline-plot { display:block; max-width:none; }
+.token-series-input { color:var(--accent); stroke:var(--accent); }
+.token-series-output { color:var(--token-output); stroke:var(--token-output); }
+.token-series-cache { color:var(--muted); stroke:var(--muted); stroke-dasharray:4 3; }
+.token-timeline-axis line { stroke:var(--border); stroke-width:1; }
+.token-timeline-axis text,.token-point-number,.token-timeline-axis-title { fill:var(--muted); font:12px var(--font-sans); font-variant-numeric:tabular-nums; }
+.token-series-line { fill:none; stroke-width:1.8; stroke-linejoin:round; pointer-events:none; }
+.token-timeline-point { cursor:pointer; }
+.token-point-hit { fill:transparent; }
+.token-point-mark { fill:var(--accent); stroke:var(--panel); stroke-width:1; pointer-events:none; }
+.token-point-mark.token-series-input { fill:var(--accent); }
+.token-point-mark.token-series-output { fill:var(--token-output); }
+.token-point-mark.token-series-cache { fill:var(--muted); stroke-dasharray:none; }
+.token-timeline-point:not(.selected):not(:hover):not(:focus-visible):not(.token-timeline-snapshot) .token-point-mark { opacity:0; }
+.token-point-cursor { stroke:var(--muted); stroke-width:1; opacity:.5; pointer-events:none; }
+.token-point-focus { fill:none; stroke:transparent; stroke-width:2; pointer-events:none; }
+.token-timeline-point:hover .token-point-focus,.token-timeline-point:focus-visible .token-point-focus,.token-timeline-point.selected .token-point-focus { stroke:var(--accent); }
+.token-timeline-point:focus { outline:none; }
+.token-timeline-snapshot .token-point-mark { fill:var(--panel); stroke:var(--warning); stroke-width:1.8; }
+.token-compaction-band { fill:var(--warning); opacity:.09; pointer-events:none; }
+.token-compaction > line { stroke:var(--warning); stroke-width:1.5; stroke-dasharray:3 3; pointer-events:none; }
+.token-compaction-label { fill:var(--panel); stroke:var(--warning); }
+.token-compaction-hit { fill:transparent; stroke:none; }
+.token-compaction path { fill:none; stroke:var(--warning); stroke-width:1.4; pointer-events:none; }
+.token-compaction-action { cursor:pointer; }
+.token-compaction-action:hover .token-compaction-label,.token-compaction-action:focus-visible .token-compaction-label { stroke-width:2; }
+.token-compaction-action:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.token-timeline-pagination { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-top:8px; color:var(--muted); font-size:12px; line-height:20px; font-variant-numeric:tabular-nums; }
+.token-timeline-pagination > div { display:flex; flex:none; align-items:center; gap:4px; }
+.token-icon-button { display:inline-flex; flex:none; align-items:center; justify-content:center; width:32px; height:32px; padding:0; border:0; border-radius:4px; background:transparent; color:var(--muted); }
+.token-icon-button:hover { background:var(--hover); color:var(--text); }
+.token-icon-button:disabled { cursor:default; opacity:.4; }
+.token-compaction-events { margin-top:24px; color:var(--soft); font-size:14px; line-height:20px; }
+.token-compaction-events > summary { display:flex; align-items:center; gap:12px; min-height:36px; padding:6px 0; cursor:pointer; }
+.token-compaction-events > summary > span { margin-left:auto; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+.token-compaction-links { margin-top:6px; }
+.token-compaction-links button { display:flex; align-items:center; gap:10px; width:100%; min-height:40px; padding:8px 0; border:0; border-top:1px solid var(--border); background:transparent; color:var(--soft); text-align:left; font-size:12px; font-variant-numeric:tabular-nums; }
+.token-compaction-links button > svg:first-child { color:var(--warning); }
+.token-compaction-links button > svg:last-child { margin-left:auto; color:var(--muted); }
+.token-compaction-links button > span { color:var(--muted); }
+.token-compaction-links button:hover { background:var(--hover); color:var(--text); }
+.token-compaction-links button:disabled { cursor:default; }
+.token-timeline-note { margin-top:20px; color:var(--muted); font-size:12px; line-height:1.8; }
+.token-timeline-note > summary { display:flex; align-items:center; gap:6px; width:fit-content; min-height:36px; list-style:none; cursor:pointer; }
+.token-timeline-note > summary::-webkit-details-marker { display:none; }
+.token-timeline-note[open] > summary > svg { transform:rotate(90deg); }
+.token-timeline-note p { margin:0; }
+.token-timeline-note p + p { margin-top:6px; }
+.token-timeline :is(button,select,summary):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.token-timeline-empty { margin-top:20px; padding:44px 20px 20px; border-block:1px solid var(--border); color:var(--muted); text-align:center; font-size:14px; }
+.token-empty-axis { height:1px; margin-bottom:24px; background:var(--border); }
+.token-timeline-empty p { margin:0; }
+@media(max-width:600px) {
+  .token-timeline-controls { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+  .token-timeline-modes { grid-column:1; grid-row:1; }
+  .token-timeline-modes button { min-height:44px; padding-inline:8px; }
+  .token-timeline-summary { display:contents; }
+  .token-record-count { grid-column:1/-1; grid-row:2; gap:16px; }
+  .token-metric-control { grid-column:2; grid-row:1; min-height:44px; max-width:124px; }
+  .token-timeline-legend { gap:8px 14px; margin-top:16px; }
+  .token-icon-button { width:44px; height:44px; }
+  .token-compaction-events > summary,.token-compaction-links button,.token-timeline-note > summary { min-height:44px; }
+}

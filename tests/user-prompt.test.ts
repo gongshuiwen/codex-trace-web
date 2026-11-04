@@ -23,18 +23,17 @@ describe('complete request text and saved disclosure choices', () => {
 
   it('assigns separate text identities to primary and supplemental requests', () => {
     const html = renderToStaticMarkup(createElement('div', {},
-      createElement(UserPrompt, { text: 'main request', sessionId: 'prompt-identities', stateKey: 'prompt:turn', indented: true }),
+      createElement(UserPrompt, { text: 'main request', sessionId: 'prompt-identities', stateKey: 'prompt:turn' }),
       createElement(UserPrompt, { text: '<supplemental>', sessionId: 'prompt-identities', stateKey: 'prompt:turn:supplemental' }),
     ));
     const ids = [...html.matchAll(/<p id="([^"]+)"/g)].map(match => match[1]);
     expect(ids).toHaveLength(2);
     expect(new Set(ids).size).toBe(2);
     expect(html).toContain('&lt;supplemental&gt;');
-    expect(html.match(/user-prompt-indented/g)).toHaveLength(1);
   });
 
   it('keeps the same outer reading anchor when a primary request expands or collapses', () => {
-    const props = { text: 'request\n'.repeat(20), sessionId: 'prompt-anchor', stateKey: 'prompt:turn', anchorId: 'user-prompt:turn', indented: true };
+    const props = { text: 'request\n'.repeat(20), sessionId: 'prompt-anchor', stateKey: 'prompt:turn', anchorId: 'user-prompt:turn' };
     const collapsed = renderToStaticMarkup(createElement(UserPrompt, props));
     eventViewState.set(props.sessionId, props.stateKey, true);
     const expanded = renderToStaticMarkup(createElement(UserPrompt, props));

@@ -12,11 +12,11 @@ function storage() {
 }
 
 describe('sidebar width preferences', () => {
-  it('uses the existing desktop defaults when no valid preference is available', () => {
-    expect(sidebarWidth(null, 1440)).toBe(312);
-    expect(sidebarWidth(null, 1200)).toBe(288);
-    expect(sidebarWidth(Number.NaN, 1440)).toBe(312);
-    expect(sidebarWidth(Number.POSITIVE_INFINITY, 1200)).toBe(288);
+  it('uses the reading workspace default when no valid preference is available', () => {
+    expect(sidebarWidth(null, 1440)).toBe(280);
+    expect(sidebarWidth(null, 1200)).toBe(280);
+    expect(sidebarWidth(Number.NaN, 1440)).toBe(280);
+    expect(sidebarWidth(Number.POSITIVE_INFINITY, 1200)).toBe(280);
   });
 
   it('bounds manual widths while reserving space for the main panel', () => {

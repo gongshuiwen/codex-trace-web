@@ -1,0 +1,106 @@
+/* One shared frame surrounds the archive and the reading sheet. */
+.topbar { display:flex; flex:none; height:48px; align-items:center; justify-content:space-between; gap:16px; padding:0 var(--canvas-pad) 0 12px; background:var(--bg); }
+.breadcrumbs { display:flex; min-width:0; align-items:center; gap:10px; color:var(--muted); font-size:13px; }
+.breadcrumbs > strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--soft); font-weight:500; }
+.topbar-product { white-space:nowrap; }
+.topbar-actions { display:flex; flex:none; align-items:center; gap:10px; }
+.live-status { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; white-space:nowrap; }
+.live-status .dot { background:var(--muted); }
+.live-status .muted-dot { background:var(--warning); }
+.keyboard-button { display:flex; width:28px; height:28px; align-items:center; justify-content:center; border:1px solid var(--border); border-radius:6px; background:transparent; color:var(--muted); font-size:12px; }
+.keyboard-button:hover { background:var(--hover); color:var(--text); }
+.app-shell:has(> .sidebar) .topbar-product,.app-shell:has(> .sidebar) .topbar-scope-separator { display:none; }
+.session-workspace { container:session / inline-size; margin:0 8px 8px 0; overflow:hidden; border:1px solid var(--border); border-radius:16px; background:var(--panel); }
+.main-panel > :is(.welcome-state,.main-error) { margin:0 8px 8px 0; border:1px solid var(--border); border-radius:16px; background:var(--panel); }
+.session-header { padding:16px var(--canvas-pad) 8px; }
+.session-header .session-title-row { gap:16px; }
+.session-header .session-title-row h1 { font-size:var(--fs-title); line-height:1.35; font-weight:600; }
+.session-header .session-meta-row { min-height:24px; margin-top:4px; gap:4px 12px; }
+.session-location { display:flex; min-width:0; flex:1; align-items:center; gap:7px; }
+.session-location > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.session-cwd { max-width:380px; }
+.session-branch { max-width:140px; flex-shrink:2; }
+.session-model { max-width:180px; }
+.session-header .related-sessions > button { min-height:24px; padding-inline:4px; }
+.session-header .related-sessions .subtle-badge { padding-block:1px; }
+.session-header .status-label.completed { color:var(--muted); }
+.session-workspace .timeline-toolbar { min-height:40px; flex-wrap:nowrap; gap:12px; padding:0 var(--canvas-pad); border-top:0; }
+.timeline-view-buttons { align-self:stretch; gap:20px; }
+.timeline-view-buttons > button { position:relative; min-height:40px; padding:8px 0; border-radius:0; background:transparent; color:var(--muted); font-size:13px; white-space:nowrap; }
+.timeline-view-buttons > button:hover { color:var(--text); }
+.timeline-view-buttons > button[aria-pressed="true"] { color:var(--text); font-weight:600; }
+.timeline-view-buttons > button[aria-pressed="true"]::after { position:absolute; inset:auto 0 -1px; height:2px; background:var(--accent); content:''; }
+.conversation-mode-select { min-height:var(--control-height); max-width:116px; padding:4px 8px; border:1px solid var(--border); border-radius:var(--radius-control); background:var(--panel); color:var(--soft); font-size:12px; }
+.conversation-mode-mobile { display:none; }
+.timeline-tools-menu { display:block; position:relative; z-index:5; }
+.timeline-tools-menu > summary { display:flex; width:32px; height:32px; align-items:center; justify-content:center; border-radius:var(--radius-control); list-style:none; cursor:pointer; color:var(--muted); }
+.timeline-tools-menu > summary::-webkit-details-marker { display:none; }
+.timeline-tools-menu > summary:hover,.timeline-tools-menu[open] > summary { background:var(--hover); color:var(--text); }
+.timeline-tools-menu-items { position:absolute; top:calc(100% + 6px); right:0; width:190px; padding:6px; border:1px solid var(--border); border-radius:var(--radius-card); background:var(--panel); box-shadow:var(--shadow); }
+.timeline-tools-menu-items .tool-bulk-button { width:100%; min-height:44px; justify-content:flex-start; gap:8px; padding-inline:10px; }
+.timeline-tools-menu-items .tool-bulk-label { display:inline; }
+.timeline-tools-menu-items button { border-radius:var(--radius-control); }
+.timeline-tool-actions .locator-toggle { display:inline-flex; min-height:32px; gap:6px; color:var(--muted); }
+.timeline-tool-actions .locator-toggle.active { color:var(--text); }
+.locator-failure-count { color:var(--danger); font-size:12px; font-variant-numeric:tabular-nums; }
+.session-locator { display:flex; flex:none; min-height:0; max-height:min(360px,42dvh); flex-direction:column; border-bottom:1px solid var(--border); background:var(--code); }
+.session-locator[hidden] { display:none; }
+.locator-tabs { display:flex; flex:none; min-width:0; align-items:center; gap:20px; padding:6px var(--canvas-pad) 0; }
+.locator-tabs > button { display:inline-flex; min-height:32px; align-items:center; gap:5px; padding:2px 0; border:0; background:transparent; color:var(--muted); font-size:12px; white-space:nowrap; }
+.locator-tabs > button:hover:not(:disabled),.locator-tabs > button[aria-pressed="true"] { color:var(--text); }
+.locator-tabs > button[aria-pressed="true"] { font-weight:600; }
+.locator-tabs > button:disabled { opacity:.65; cursor:default; }
+.locator-tabs > button > span { font-variant-numeric:tabular-nums; }
+.locator-tabs > .turn-directory-trigger { margin-left:auto; }
+.session-locator .tool-search-panel { flex:1; max-height:none; padding-top:6px; padding-bottom:10px; border-bottom:0; background:transparent; }
+.session-locator .tool-search-panel input { background:var(--panel); }
+.session-locator .session-record-navigation { border-bottom:0; background:transparent; }
+.session-locator .tool-search-results-list > button { border-color:var(--border); }
+.session-locator .tool-search-results-list > button[aria-current="true"] { background:var(--active); box-shadow:none; }
+.session-locator .session-record-actions > button { color:var(--soft); }
+.new-content-button { max-width:calc(100% - 32px); white-space:nowrap; }
+
+@container session (max-width:800px) {
+  .conversation-mode-desktop { display:none; }
+  .conversation-mode-mobile { display:block; padding:4px 0; }
+  .conversation-mode-mobile .conversation-mode-select { width:100%; max-width:none; min-height:44px; }
+  .session-workspace .timeline-tool-actions { gap:4px; }
+  .session-location { gap:6px; }
+  .session-cwd { max-width:240px; }
+}
+@container session (max-width:650px) {
+  .session-meta-row { flex-wrap:wrap; }
+  .session-location { flex-basis:100%; min-height:22px; }
+  .related-sessions { max-width:100%; flex-wrap:wrap; }
+  .session-workspace .timeline-toolbar { gap:8px; }
+  .timeline-view-buttons { gap:16px; }
+  .timeline-view-buttons > button { min-height:44px; font-size:12px; }
+  .timeline-tools-menu > summary { width:36px; height:44px; }
+  .timeline-tool-actions .locator-toggle { min-width:36px; min-height:44px; justify-content:center; }
+  .locator-toggle > .locator-label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .locator-tabs { flex-wrap:wrap; gap:0 16px; }
+  .locator-tabs > button { min-height:36px; }
+}
+@media(max-width:900px) {
+  .session-workspace,.main-panel > :is(.welcome-state,.main-error) { margin:0; border-width:0; border-radius:0; }
+  .topbar { padding-inline:12px; }
+}
+@media(max-width:600px) {
+  .topbar { gap:8px; }
+  .breadcrumbs { gap:5px; }
+  .topbar-actions { gap:2px; }
+  .live-status { font-size:11px; }
+  .keyboard-button { display:none; }
+  .session-header { padding-top:12px; }
+  .session-header .session-title-row h1 { font-size:20px; }
+  .session-header .session-meta-row { gap:2px 8px; }
+  .session-header .related-sessions { gap:6px; }
+  .session-header .related-sessions > button { min-height:28px; }
+  .session-model { max-width:45%; }
+  .locator-tabs { gap:0 12px; }
+  .locator-tabs > .turn-directory-trigger { margin-left:0; }
+  .session-locator { max-height:42dvh; }
+}
+@media(pointer:coarse) {
+  .timeline-tools-menu > summary,.timeline-tool-actions .locator-toggle,.locator-tabs > button { min-width:44px; min-height:44px; }
+}

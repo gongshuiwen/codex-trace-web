@@ -15,7 +15,7 @@ const series = [
   ['outputTokens', '输出', 'token-series-output'],
   ['cachedInputTokens', '缓存读取（输入子集）', 'token-series-cache'],
 ] as const;
-const tokenIconButton = 'icon-button inline-flex size-[var(--control-height)] shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--accent-light)] hover:text-[var(--accent-strong)] disabled:cursor-default disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]';
+const tokenIconButton = 'token-icon-button';
 
 export function TokenTimeline({ activity, selectedId, onSelectRequest, onNavigateTurn }: {
   activity: SessionActivity;
@@ -89,6 +89,11 @@ export function TokenTimeline({ activity, selectedId, onSelectRequest, onNavigat
     if (next === null) {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
+        // Enter can arrive before the deferred arrow-key focus update.
+        const point = event.currentTarget.ownerSVGElement?.querySelector<SVGGElement>(`[data-request-index="${current}"]`);
+        // A dense overview or a page change may not have mounted the point yet.
+        // Restoring the chart avoids reselecting the old call through onFocus.
+        (point ?? chartRef.current)?.focus({ preventScroll: true });
         revealDetails(current);
       }
       return;
@@ -110,18 +115,22 @@ export function TokenTimeline({ activity, selectedId, onSelectRequest, onNavigat
   const markedPoints = mode === 'overview' && plot.points.length > 200
     ? plot.points.filter(point => point.index === selected?.index || point.request.source !== 'record')
     : plot.points;
-  return <section className="token-timeline min-w-0 text-[var(--text)]" aria-label="调用趋势与压缩时间轴">
+  return <section className="token-timeline" aria-label="调用趋势与压缩时间轴">
     <div className="token-timeline-controls">
-      {activity.requests.length > 0 && <div className="token-timeline-modes flex gap-1 rounded-md bg-[var(--code)] p-0.5 max-[560px]:gap-0" aria-label="趋势图范围">{([['overview', '全局概览'], ['detail', '逐次记录']] as const).map(([id, label]) => <button key={id} type="button" className={`min-h-[var(--control-height)] rounded px-3 py-1 text-[12px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] max-[560px]:px-2 ${mode === id ? 'bg-[var(--accent-light)] font-medium text-[var(--accent-strong)]' : 'bg-transparent text-[var(--muted)] hover:bg-[var(--hover)]'}`} aria-pressed={mode === id} onClick={() => { if (selected) { selectIndex(selected.index); if (id === 'detail') setPage(Math.floor(selected.index / TOKEN_TIMELINE_PAGE_SIZE)); } setMode(id); }}>{label}</button>)}</div>}
+      {activity.requests.length > 0 && <div className="token-timeline-modes" aria-label="趋势图范围">{([['overview', '全局概览'], ['detail', '逐次记录']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={mode === id} onClick={() => { if (selected) { selectIndex(selected.index); if (id === 'detail') setPage(Math.floor(selected.index / TOKEN_TIMELINE_PAGE_SIZE)); } setMode(id); }}>{label}</button>)}</div>}
       <div className="token-timeline-summary">
-        <p className="token-record-count">{activity.requests.length.toLocaleString()} 条记录 · {activity.compactions.length.toLocaleString()} 次压缩</p>
-        {activity.requests.length > 0 && <select className="token-metric-control min-h-[var(--control-height)] rounded-md border border-[var(--control)] bg-[var(--panel)] py-1 pr-7 pl-2.5 text-[12px] text-[var(--soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] max-[560px]:max-w-[120px]" aria-label="图表用量指标" value={metric} onChange={event => setMetric(event.target.value as TokenMetric)}>{metrics.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>}
+        <p className="token-record-count"><span>{activity.requests.length.toLocaleString()} 条记录</span><span>{activity.compactions.length.toLocaleString()} 次压缩</span></p>
+        {activity.requests.length > 0 && <select className="token-metric-control" aria-label="图表用量指标" value={metric} onChange={event => setMetric(event.target.value as TokenMetric)}>{metrics.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>}
       </div>
     </div>
-    {activity.requests.length === 0 ? <p className="token-timeline-empty my-0 py-6 text-[12px] leading-5 text-[var(--muted)]">没有可绘制的模型调用用量记录。</p> : <>
-      <div className="token-timeline-legend mt-4 mb-3 flex flex-wrap gap-x-5 gap-y-2 text-[12px] leading-4 text-[var(--soft)] max-[560px]:gap-x-3">{visibleSeries.map(([field, label, className]) => <span key={field} className="inline-flex items-center gap-1.5"><i className={`${className} inline-block w-[18px] border-t-2 ${field === 'cachedInputTokens' ? 'border-dashed' : ''}`} />{label}</span>)}<span className="inline-flex items-center gap-1.5"><Minimize2 size={13} />压缩</span>{hasSnapshots && <span className="token-snapshot-legend inline-flex items-center gap-1.5 text-[var(--warning)]">◇ 累计差值</span>}</div>
-      <div ref={chartRef} className={`token-timeline-scroll token-timeline-${mode} overflow-x-auto overflow-y-hidden rounded-[7px] border border-[var(--border)] bg-[var(--panel)] [scrollbar-color:var(--control)_transparent] [scrollbar-width:thin]`} aria-label={mode === 'overview' ? '全部调用趋势' : '逐次调用趋势，可横向滚动'}>
-        <svg className="token-timeline-plot block max-w-none" width={plot.width} height={TOKEN_PLOT.height} viewBox={`0 0 ${plot.width} ${TOKEN_PLOT.height}`} role="group" aria-label="按日志记录顺序排列的 Token 趋势。左右方向键选择调用，回车查看明细。" onClick={event => {
+    {activity.requests.length === 0 ? <div className="token-timeline-empty"><div className="token-empty-axis" aria-hidden="true" /><p>没有可绘制的模型调用用量记录。</p></div> : <>
+      <div className="token-timeline-legend">{metric === 'all' && visibleSeries.map(([field, label, className]) => <span key={field}><i className={className} />{label}</span>)}{activity.compactions.length > 0 && <span className="token-compaction-legend"><Minimize2 size={13} />压缩断点</span>}{hasSnapshots && <span className="token-snapshot-legend">◇ 累计差值</span>}</div>
+      <div ref={chartRef} tabIndex={-1} className={`token-timeline-scroll token-timeline-${mode}`} aria-label={mode === 'overview' ? '全部调用趋势' : '逐次调用趋势，可横向滚动'} onFocus={event => {
+        if (event.target !== event.currentTarget || !cursorRef.current) return;
+        // A page change may mount the selected point after the focus update.
+        event.currentTarget.querySelector<SVGGElement>(`[data-request-index="${cursorRef.current.index}"]`)?.focus({ preventScroll: true });
+      }}>
+        <svg className="token-timeline-plot" width={plot.width} height={TOKEN_PLOT.height} viewBox={`0 0 ${plot.width} ${TOKEN_PLOT.height}`} role="group" aria-label="按日志记录顺序排列的 Token 趋势。左右方向键选择调用，回车查看明细。" onClick={event => {
           const rect = event.currentTarget.getBoundingClientRect();
           const index = nearestRequestIndex((event.clientX - rect.left) * plot.width / rect.width, plot);
           if (index !== null) selectIndex(index);
@@ -144,20 +153,21 @@ export function TokenTimeline({ activity, selectedId, onSelectRequest, onNavigat
           })}
           {plot.points.filter(point => plot.labels.has(point.index)).map(point => <text key={point.index} className="token-point-number" x={point.x} y={TOKEN_PLOT.bottom + 21} textAnchor="middle">{point.index + 1}</text>)}
           {compactions.map(({ marker, index, x }) => <g className="token-compaction" key={marker.id}>
+            <rect className="token-compaction-band" x={x - 3} y={28} width={6} height={TOKEN_PLOT.bottom - 28} />
             <line x1={x} x2={x} y1={28} y2={TOKEN_PLOT.bottom} />
             <g className={marker.turnId ? 'token-compaction-action' : ''} role={marker.turnId ? 'button' : 'img'} tabIndex={marker.turnId ? 0 : undefined}
               aria-label={`第 ${index + 1} 次上下文压缩 · ${clock(marker.timestamp)}${marker.turnId ? '，跳到所在轮次' : '，未记录轮次'}`}
               onClick={event => { event.stopPropagation(); if (marker.turnId) onNavigateTurn(marker.turnId); }} onKeyDown={event => { if (marker.turnId && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onNavigateTurn(marker.turnId); } }}>
               <title>{`上下文压缩 ${clock(marker.timestamp)}\n记录边界：第 ${marker.beforeRequestIndex} 条用量记录之后${marker.turnId ? '\n跳到所在轮次' : '\n未记录所属轮次'}`}</title>
-              <rect x={x - 9} y={7} width={18} height={18} rx={4} /><path d={`M${x - 3},12 l3,3 l3,-3 M${x - 3},20 l3,-3 l3,3`} />
+              <rect className="token-compaction-hit" x={x - 18} y={0} width={36} height={30} /><rect className="token-compaction-label" x={x - 9} y={7} width={18} height={18} rx={2} /><path d={`M${x - 3},12 l3,3 l3,-3 M${x - 3},20 l3,-3 l3,3`} />
             </g>
           </g>)}
           <text className="token-timeline-axis-title" x={TOKEN_PLOT.left} y={TOKEN_PLOT.height - 3}>用量记录序号</text>
         </svg>
       </div>
-      <div className="token-timeline-pagination mt-2 flex flex-wrap items-center justify-between gap-2 text-[12px] leading-5 text-[var(--muted)]"><span>{mode === 'overview' ? `全部 ${activity.requests.length.toLocaleString()} 条 · 按日志顺序` : `第 ${plot.start + 1}–${plot.end} 条 / 共 ${activity.requests.length.toLocaleString()} 条${plot.width > width ? ' · 可横向滚动' : ''}`}</span>{mode === 'detail' && <div className="flex items-center gap-2 tabular-nums"><button type="button" className={tokenIconButton} aria-label="上一页用量记录" disabled={plot.page === 0} onClick={() => selectIndex((plot.page - 1) * TOKEN_TIMELINE_PAGE_SIZE)}><ChevronLeft size={16} /></button><span>{plot.page + 1} / {plot.pages}</span><button type="button" className={tokenIconButton} aria-label="下一页用量记录" disabled={plot.page + 1 >= plot.pages} onClick={() => selectIndex((plot.page + 1) * TOKEN_TIMELINE_PAGE_SIZE)}><ChevronRight size={16} /></button></div>}</div>
+      <div className="token-timeline-pagination"><span>{mode === 'overview' ? `全部 ${activity.requests.length.toLocaleString()} 条 · 按日志顺序` : `第 ${plot.start + 1}–${plot.end} 条 / 共 ${activity.requests.length.toLocaleString()} 条${plot.width > width ? ' · 可横向滚动' : ''}`}</span>{mode === 'detail' && <div><button type="button" className={tokenIconButton} aria-label="上一页用量记录" disabled={plot.page === 0} onClick={() => selectIndex((plot.page - 1) * TOKEN_TIMELINE_PAGE_SIZE)}><ChevronLeft size={16} /></button><span>{plot.page + 1} / {plot.pages}</span><button type="button" className={tokenIconButton} aria-label="下一页用量记录" disabled={plot.page + 1 >= plot.pages} onClick={() => selectIndex((plot.page + 1) * TOKEN_TIMELINE_PAGE_SIZE)}><ChevronRight size={16} /></button></div>}</div>
     </>}
-    {activity.compactions.length > 0 && <details className="token-compaction-events mt-4 text-[12px] leading-5 text-[var(--soft)]"><summary className="min-h-[var(--control-height)] cursor-pointer py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">压缩事件 · {activity.compactions.length.toLocaleString()} 次</summary><div className="token-compaction-links mt-2 flex flex-wrap gap-2" aria-label="压缩事件">{activity.compactions.map(marker => <button type="button" className="inline-flex min-h-[var(--control-height)] items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--panel)] px-2.5 py-1.5 text-[12px] text-[var(--soft)] transition-colors hover:bg-[var(--hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]" key={marker.id} disabled={!marker.turnId} onClick={() => { if (marker.turnId) onNavigateTurn(marker.turnId); }} title={marker.turnId ? '跳到压缩所在轮次' : '日志未记录所属轮次'}><Minimize2 size={13} />{clock(marker.timestamp)} · 第 {marker.beforeRequestIndex} 条之后</button>)}</div></details>}
+    {activity.compactions.length > 0 && <details className="token-compaction-events"><summary>压缩事件 <span>{activity.compactions.length.toLocaleString()} 次</span></summary><div className="token-compaction-links" aria-label="压缩事件">{activity.compactions.map(marker => <button type="button" key={marker.id} disabled={!marker.turnId} onClick={() => { if (marker.turnId) onNavigateTurn(marker.turnId); }} title={marker.turnId ? '跳到压缩所在轮次' : '日志未记录所属轮次'}><Minimize2 size={13} /><time>{clock(marker.timestamp)}</time><span>第 {marker.beforeRequestIndex} 条之后</span><ChevronRight size={14} /></button>)}</div></details>}
     <details className="token-timeline-note">
       <summary><ChevronRight size={13} aria-hidden="true" />统计口径</summary>
       <div>

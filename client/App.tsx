@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { ArrowDown, ArrowLeft, Check, ChevronDown, ChevronRight, ChevronUp, Circle, FileSearch, FolderOpen, GitBranch, Layers3, ListOrdered, LoaderCircle, Menu, Moon, MoreHorizontal, PanelLeftClose, Search, Sun, Monitor, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ChevronDown, ChevronRight, ChevronUp, Circle, FileSearch, FolderOpen, GitBranch, Layers3, ListFilter, ListOrdered, LoaderCircle, Menu, Moon, MoreHorizontal, PanelLeftClose, Search, Sun, Monitor, X } from 'lucide-react';
 import type { CompactionItem, IndexProgress, LiveEvent, SessionDetail, SessionList, SessionSummary, ToolFailureItem, ToolSearchMatch } from '../shared/types';
 import { api, errorMessage, isAbort, sessionPath } from './api';
 import { Sidebar } from './Sidebar';
@@ -16,7 +16,6 @@ import { ToolFailureNavigator } from './ToolFailureNavigator';
 import { CompactionNavigator } from './CompactionNavigator';
 import { toolGroupViewState, toolTabState } from './tool-view-state';
 import { TurnDirectory } from './TurnDirectory';
-import './session-header.css';
 import './tool-search.css';
 
 const SettingsModal = lazy(() => import('./SettingsModal').then(module => ({ default: module.SettingsModal })));
@@ -81,7 +80,11 @@ export function App() {
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    function apply() { document.documentElement.dataset.theme = theme === 'system' ? media.matches ? 'dark' : 'light' : theme; }
+    function apply() {
+      const resolved = theme === 'system' ? media.matches ? 'dark' : 'light' : theme;
+      document.documentElement.dataset.theme = resolved;
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'dark' ? '#111111' : '#f9fbfc');
+    }
     apply(); media.addEventListener('change', apply);
     try { localStorage.setItem('session-lens-theme', theme); } catch { /* Theme still works when browser storage is unavailable. */ }
     return () => media.removeEventListener('change', apply);
@@ -179,7 +182,7 @@ export function App() {
 
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
-      if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) return;
+      if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
       if (event.key === 'Escape') { setShowSettings(false); setShowShortcuts(false); if (window.innerWidth <= 900) setSidebarOpen(false); return; }
       const target = event.target as HTMLElement | null;
       if (showSettings || target?.closest('[role="dialog"],input,textarea,select,[contenteditable="true"]')) return;
@@ -198,15 +201,24 @@ export function App() {
   const activeSession = session?.session.id === location.session ? session : null;
   const ThemeIcon = theme === 'system' ? Monitor : theme === 'dark' ? Moon : Sun;
   return <div className="app-shell flex h-dvh overflow-hidden bg-[var(--bg)]">
-    {sidebarOpen && <><button className="sidebar-backdrop fixed inset-0 z-20 border-0 bg-[#10231855] min-[901px]:hidden" aria-label="关闭侧栏" onClick={() => setSidebarOpen(false)} /><Sidebar data={sessions} selectedId={location.session} query={query} project={project} loading={listLoading} error={listError} onQuery={setQuery} onProject={setProject} onSelect={selectSession} onLoadMore={() => { if (sessions?.nextCursor != null) void fetchList(sessions.nextCursor); }} onSettings={() => setShowSettings(true)} onClose={() => setSidebarOpen(false)} /></>}
+    {sidebarOpen && <><button className="sidebar-backdrop fixed inset-0 z-20 border-0 bg-[#11111166] min-[901px]:hidden" aria-label="关闭侧栏" onClick={() => setSidebarOpen(false)} /><Sidebar data={sessions} selectedId={location.session} query={query} project={project} loading={listLoading} error={listError} onQuery={setQuery} onProject={setProject} onSelect={selectSession} onLoadMore={() => { if (sessions?.nextCursor != null) void fetchList(sessions.nextCursor); }} onSettings={() => setShowSettings(true)} onClose={() => setSidebarOpen(false)} /></>}
     <main className="main-panel relative flex min-w-0 flex-1 flex-col">
-      <div className="topbar flex h-[54px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--panel)] px-[var(--canvas-pad)] max-[600px]:h-12 max-[600px]:px-3"><div className="breadcrumbs flex min-w-0 items-center gap-3 text-xs text-[var(--muted)] [&>span]:max-[600px]:hidden [&>strong]:truncate [&>strong]:font-medium [&>strong]:text-[var(--soft)] max-[600px]:gap-1"><button className="icon-button" onClick={() => setSidebarOpen(value => !value)} title={sidebarOpen ? '收起侧栏' : '展开侧栏'} aria-label={sidebarOpen ? '收起侧栏' : '展开侧栏'}>{sidebarOpen ? <PanelLeftClose size={18} /> : <Menu size={18} />}</button><span>工作空间</span><ChevronRight size={13} /><strong>{activeSession?.session.project || '会话浏览'}</strong></div><div className="topbar-actions flex shrink-0 items-center gap-3 max-[600px]:gap-1"><span className="live-status flex items-center gap-1.5 whitespace-nowrap text-xs text-[var(--muted)]"><span className={`dot ${connected ? '' : 'muted-dot'}`} />{connected ? '实时连接' : '正在重连'}</span><button className="icon-button" title={`主题：${theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色'}，点击切换`} aria-label="切换主题" onClick={() => setTheme(value => value === 'system' ? 'dark' : value === 'dark' ? 'light' : 'system')}><ThemeIcon size={17} /></button><button className="keyboard-button size-7 rounded-md border border-[var(--border)] bg-transparent text-xs text-[var(--muted)] hover:bg-[var(--hover)] max-[600px]:hidden" onClick={() => setShowShortcuts(!showShortcuts)} title="快捷键">?</button></div></div>
+      <div className="topbar">
+        <div className="breadcrumbs">
+          <button className="icon-button" onClick={() => setSidebarOpen(value => !value)} title={sidebarOpen ? '收起侧栏' : '展开侧栏'} aria-label={sidebarOpen ? '收起侧栏' : '展开侧栏'}>{sidebarOpen ? <PanelLeftClose size={18} /> : <Menu size={18} />}</button>
+          <span className="topbar-product">会话观察台</span><ChevronRight size={13} className="topbar-scope-separator" aria-hidden="true" /><strong>{activeSession?.session.project || '会话浏览'}</strong>
+        </div>
+        <div className="topbar-actions">
+          <span className="live-status"><span className={`dot ${connected ? '' : 'muted-dot'}`} />{connected ? '实时连接' : '正在重连'}</span>
+          <button className="icon-button" title={`主题：${theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色'}，点击切换`} aria-label="切换主题" onClick={() => setTheme(value => value === 'system' ? 'dark' : value === 'dark' ? 'light' : 'system')}><ThemeIcon size={17} /></button>
+          <button className="keyboard-button" onClick={() => setShowShortcuts(!showShortcuts)} title="快捷键" aria-label="键盘快捷键">?</button>
+        </div>
+      </div>
       {sessionError && !activeSession && <div className="main-error flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center text-sm text-[var(--muted)] [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:text-[var(--text)]" role="alert"><FileSearch size={26} /><h2>暂时无法读取会话</h2><p>{sessionError}</p><button className="secondary-button" onClick={() => setSessionVersion(value => value + 1)}>重新读取</button></div>}
       {sessionError && activeSession && <div className="session-refresh-error" role="alert"><span>刷新失败，仍显示已加载内容。{sessionError}</span><button type="button" className="text-button" onClick={() => setSessionVersion(value => value + 1)}>重试刷新</button></div>}
       {!sessionError && !activeSession && (sessionLoading || listLoading) && <div className="welcome-state flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center text-sm leading-7 text-[var(--muted)] [&>h1]:text-2xl [&>h1]:font-semibold [&>h1]:text-[var(--text)] [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:text-[var(--text)] [&>svg]:text-[var(--accent)]"><LoaderCircle size={28} className="spin" /><h2>正在读取本地会话</h2><p>先载入摘要，详细内容按需读取。</p></div>}
       {!sessionError && !activeSession && !sessionLoading && !listLoading && <div className="welcome-state flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center text-sm leading-7 text-[var(--muted)] [&>h1]:text-2xl [&>h1]:font-semibold [&>h1]:text-[var(--text)] [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:text-[var(--text)] [&>svg]:text-[var(--accent)]"><Layers3 size={32} /><h1>会话观察台</h1><p>浏览本地 Codex 会话、工具调用与 Token 用量。<br />选择一个会话开始阅读，或设置日志目录。</p><button className="primary-button" onClick={() => setShowSettings(true)}><FolderOpen size={16} />选择日志目录</button></div>}
       {activeSession && <SessionWorkspace key={activeSession.session.id} session={activeSession} reloadVersion={sessionVersion} location={location} onNavigate={navigate} navigationVersion={navigationVersion} onSelectSession={selectSession} onTargetTurn={navigateTurn} />}
-      <footer className="statusbar flex h-7 shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--panel)] px-[var(--canvas-pad)] text-xs text-[var(--muted)] [&>span]:flex [&>span]:items-center [&>span]:gap-1.5"><span><Check size={12} />本地日志 · 只读</span><span className="statusbar-right ml-auto">Session Lens<span className="version ml-1 font-mono text-[11px]">v0.1</span></span></footer>
     </main>
     {showSettings && <Suspense fallback={null}><SettingsModal onClose={() => setShowSettings(false)} onSaved={() => { setSessions(null); setSession(null); navigate({ session: null, turn: null, view: 'conversation', request: null, usageTurn: null, focus: null }, true); setListVersion(value => value + 1); }} /></Suspense>}
     {showShortcuts && <div className="shortcut-popover absolute right-5 top-14 z-50 w-64 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-lg [&>div]:flex [&>div]:items-center [&>div]:justify-between [&>p]:mt-3 [&>p]:flex [&>p]:justify-between [&>p]:text-xs [&>p]:text-[var(--muted)]"><div><strong>键盘快捷键</strong><button className="icon-button" onClick={() => setShowShortcuts(false)} aria-label="关闭快捷键"><X size={14} /></button></div><p><span>搜索会话</span><kbd>/</kbd></p><p><span>上 / 下一个会话</span><span><kbd>k</kbd> <kbd>j</kbd></span></p><p><span>打开设置</span><kbd>,</kbd></p><p><span>关闭面板</span><kbd>Esc</kbd></p><p><span>显示快捷键</span><kbd>?</kbd></p></div>}
@@ -297,6 +309,24 @@ function SessionWorkspace({ session, reloadVersion, location, onNavigate, naviga
     reading.preserveLayout(() => setShowToolSearch(false));
     requestAnimationFrame(() => searchToggle.current?.focus({ preventScroll: true }));
   }
+  function openLocator(kind: 'search' | 'failures' | 'compactions') {
+    if (kind !== 'search') {
+      searchController.current?.abort(); searchController.current = null;
+      searchComposing.current = false; setSearching(false);
+    }
+    reading.preserveLayout(() => {
+      setShowToolSearch(kind === 'search');
+      setRecordNavigator(kind === 'search' ? null : kind);
+      if (kind !== 'search') setRecordRequestId(value => value + 1);
+    });
+    if (kind === 'search') requestAnimationFrame(() => document.querySelector<HTMLInputElement>('#tool-search-panel input')?.focus({ preventScroll: true }));
+  }
+  function closeLocator() {
+    searchController.current?.abort(); searchController.current = null;
+    searchComposing.current = false; setSearching(false);
+    reading.preserveLayout(() => { setShowToolSearch(false); setRecordNavigator(null); });
+    requestAnimationFrame(() => searchToggle.current?.focus({ preventScroll: true }));
+  }
   const searchQueryChanged = matches !== null && toolQuery.trim() !== matchQuery;
   const searchLogChanged = matches !== null && matchRevision !== session.session.revision;
   const canNavigateSearch = Boolean(matches?.length) && !searching && !searchQueryChanged && !searchLogChanged && !searchError;
@@ -370,12 +400,13 @@ function SessionWorkspace({ session, reloadVersion, location, onNavigate, naviga
     reading.cancelNavigation();
     if (metric === 'failures' || metric === 'compactions') {
       if (view !== 'conversation') setView('conversation');
-      reading.preserveLayout(() => { setRecordNavigator(metric); setRecordRequestId(value => value + 1); });
+      openLocator(metric);
       return;
     }
     if (metric === 'requests') { onNavigate({ ...location, view: 'usage', focus: 'requests' }); return; }
     onNavigate({ ...location, view: 'usage', focus: metric, ...(metric === 'latest' ? { request: null, usageTurn: null } : {}) });
   };
+  const locatorOpen = showToolSearch || recordNavigator !== null;
   return <div className="session-workspace flex min-h-0 flex-1 flex-col" data-conversation-mode={conversationMode}>
     <header className="session-header shrink-0 bg-[var(--panel)] px-[var(--canvas-pad)] pb-3 pt-4 max-[600px]:pb-2 max-[600px]:pt-3">
       <div className="session-title-row flex items-start justify-between gap-5 [&>h1]:min-w-0 [&>h1]:flex-1 [&>h1]:text-[22px] [&>h1]:font-semibold [&>h1]:leading-snug [&>h1]:tracking-[-.02em] [&>h1]:line-clamp-2 max-[600px]:[&>h1]:text-lg"><h1 title={sessionTooltip(value)}>{sessionDisplayName(value)}</h1><span className={`status-label max-[600px]:hidden ${value.status}`}><Circle size={6} fill="currentColor" />{statusLabels[value.status]}</span></div>
@@ -388,7 +419,6 @@ function SessionWorkspace({ session, reloadVersion, location, onNavigate, naviga
       <div className="timeline-view-buttons flex items-center gap-2" aria-label="会话视图">{([['conversation', '对话'], ['usage', '用量分析'], ['collaboration', '子代理协作']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={view === id} onClick={() => { reading.cancelNavigation(); setView(id); }}>{label}</button>)}</div>
       {view === 'conversation' && <div className="timeline-tool-actions">
         <div className="conversation-mode-desktop">{modeControl}</div>
-        <button type="button" className="turn-directory-trigger icon-button" title="轮次目录" aria-label="轮次目录" aria-haspopup="dialog" aria-expanded={showTurnDirectory} aria-controls="turn-directory-dialog" onClick={() => setShowTurnDirectory(true)}><ListOrdered size={17} /></button>
         <details className="timeline-tools-menu" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }} onKeyDown={event => {
           if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); }
         }}>
@@ -397,12 +427,22 @@ function SessionWorkspace({ session, reloadVersion, location, onNavigate, naviga
             if (!(event.target as HTMLElement).closest('button:not(:disabled)')) return;
             const menu = event.currentTarget.closest('details');
             if (menu) { menu.open = false; menu.querySelector('summary')?.focus(); }
-          }}><div className="conversation-mode-mobile">{modeControl}</div>{bulkToolActions}<button type="button" className="compact-tool-search" onClick={() => reading.preserveLayout(() => setShowToolSearch(true))}><Search size={15} />搜索工具内容</button></div>
+          }}><div className="conversation-mode-mobile">{modeControl}</div>{bulkToolActions}<button type="button" className="tool-bulk-button turn-directory-trigger" aria-label="轮次目录" aria-haspopup="dialog" aria-expanded={showTurnDirectory} aria-controls="turn-directory-dialog" onClick={() => setShowTurnDirectory(true)}><ListOrdered size={15} /><span>轮次目录</span></button></div>
         </details>
-        <button ref={searchToggle} className={showToolSearch ? 'active text-button tool-search-toggle shrink-0 text-[var(--accent-strong)] max-[600px]:size-11 max-[600px]:justify-center' : 'text-button tool-search-toggle shrink-0 max-[600px]:size-11 max-[600px]:justify-center'} aria-label="搜索工具内容" aria-expanded={showToolSearch} aria-controls="tool-search-panel" onClick={() => showToolSearch ? closeToolSearch() : reading.preserveLayout(() => setShowToolSearch(true))}><Search size={16} /><span className="max-[600px]:sr-only">搜索工具内容</span></button>
+        <button ref={searchToggle} className={`text-button tool-search-toggle locator-toggle${locatorOpen ? ' active' : ''}`} aria-label="定位会话记录" title="搜索工具内容、定位失败调用与压缩记录" aria-expanded={locatorOpen} aria-controls="session-locator" onClick={() => locatorOpen ? closeLocator() : openLocator('search')}><ListFilter size={16} /><span className="locator-label">定位</span>{value.toolFailureCount != null && value.toolFailureCount > 0 && <span className="locator-failure-count" aria-label={`${value.toolFailureCount} 次工具失败`}>{value.toolFailureCount.toLocaleString()}</span>}</button>
       </div>}
     </div>
-    {view === 'conversation' && showToolSearch && <div className="tool-search-panel" id="tool-search-panel" onKeyDown={searchKeyboard}>
+    {locatorOpen && <section className="session-locator" id="session-locator" aria-label="会话定位" hidden={view !== 'conversation'} onKeyDown={event => {
+      if (event.nativeEvent.isComposing || searchComposing.current) return;
+      if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); closeLocator(); }
+    }}>
+      <div className="locator-tabs" role="group" aria-label="定位方式">
+        <button type="button" aria-pressed={showToolSearch} onClick={() => openLocator('search')}>工具搜索</button>
+        <button type="button" aria-pressed={recordNavigator === 'failures'} disabled={!(value.toolFailureCount != null && value.toolFailureCount > 0)} onClick={() => openLocator('failures')}>失败调用{value.toolFailureCount != null && <span>{value.toolFailureCount.toLocaleString()}</span>}</button>
+        <button type="button" aria-pressed={recordNavigator === 'compactions'} disabled={!(value.compactionCount != null && value.compactionCount > 0)} onClick={() => openLocator('compactions')}>压缩记录{value.compactionCount != null && <span>{value.compactionCount.toLocaleString()}</span>}</button>
+        <button type="button" className="turn-directory-trigger" aria-haspopup="dialog" aria-expanded={showTurnDirectory} aria-controls="turn-directory-dialog" onClick={() => setShowTurnDirectory(true)}><ListOrdered size={14} />轮次目录</button>
+      </div>
+    {showToolSearch && <div className="tool-search-panel" id="tool-search-panel" onKeyDown={searchKeyboard}>
       <form onSubmit={event => { event.preventDefault(); void searchTools(); }}>
         <Search size={14} aria-hidden="true" />
         <input autoFocus value={toolQuery} onChange={event => setToolQuery(event.target.value)} onCompositionStart={() => { searchComposing.current = true; }} onCompositionEnd={() => { searchComposing.current = false; }} onBlur={() => { searchComposing.current = false; }} maxLength={500} placeholder="搜索工具参数与输出" aria-label="搜索工具内容" aria-describedby="tool-search-status" />
@@ -426,11 +466,12 @@ function SessionWorkspace({ session, reloadVersion, location, onNavigate, naviga
         </button>)}
       </div>}
     </div>}
-    {recordNavigator && <div hidden={view !== 'conversation'} className="shrink-0">
+    {recordNavigator && <div className="shrink-0">
       {recordNavigator === 'failures'
-        ? <ToolFailureNavigator sessionId={value.id} revision={value.revision} requestId={recordRequestId} active={view === 'conversation'} turnIds={session.turns.map(turn => turn.id)} captureNavigationIntent={reading.captureNavigationIntent} onSelect={navigateToFailure} onClose={() => reading.preserveLayout(() => setRecordNavigator(null))} />
-        : <CompactionNavigator sessionId={value.id} revision={value.revision} requestId={recordRequestId} active={view === 'conversation'} turnIds={session.turns.map(turn => turn.id)} captureNavigationIntent={reading.captureNavigationIntent} onSelect={navigateToCompaction} onClose={() => reading.preserveLayout(() => setRecordNavigator(null))} />}
+        ? <ToolFailureNavigator sessionId={value.id} revision={value.revision} requestId={recordRequestId} active={view === 'conversation'} turnIds={session.turns.map(turn => turn.id)} captureNavigationIntent={reading.captureNavigationIntent} onSelect={navigateToFailure} onClose={closeLocator} />
+        : <CompactionNavigator sessionId={value.id} revision={value.revision} requestId={recordRequestId} active={view === 'conversation'} turnIds={session.turns.map(turn => turn.id)} captureNavigationIntent={reading.captureNavigationIntent} onSelect={navigateToCompaction} onClose={closeLocator} />}
     </div>}
+    </section>}
     <div className="workspace-content relative min-h-0 flex-1" onKeyDown={event => {
       if (view === 'conversation' && event.altKey && !event.ctrlKey && !event.metaKey && !event.nativeEvent.isComposing && canNavigateSearch && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
         event.preventDefault(); navigateToMatch(activeMatchIndex + (event.key === 'ArrowUp' ? -1 : 1));

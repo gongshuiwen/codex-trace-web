@@ -10,7 +10,7 @@ export function sidebarWidthLimit(viewportWidth: number): number {
 }
 
 export function sidebarWidth(preferredWidth: number | null, viewportWidth: number): number {
-  const fallback = viewportWidth <= 1200 ? 288 : 312;
+  const fallback = 280;
   const width = preferredWidth != null && Number.isFinite(preferredWidth) ? preferredWidth : fallback;
   return Math.round(Math.max(SIDEBAR_MIN_WIDTH, Math.min(sidebarWidthLimit(viewportWidth), width)));
 }
