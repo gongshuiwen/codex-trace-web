@@ -16,7 +16,7 @@ export function SessionStats({ usage, toolCount, toolFailureCount, durationMs, c
     { id: 'latest', label: '最近调用输入', value: tokens(usage.latestInputTokens), unit: 'tokens', title: inputPercent == null ? '查看最近一次调用的输入；缺少对应输入或窗口记录，无法计算窗口比例' : `查看最近一次调用的输入：${exactTokens(usage.latestInputTokens)} / ${exactTokens(usage.contextWindow)} tokens，${ratio}；此比例对应最近一次记录，并非实时上下文占用` },
     { id: 'failures', label: '工具失败', value: toolFailureCount == null ? '—' : toolFailureCount.toLocaleString(), unit: '次', title: toolFailureCount == null ? '正在读取工具失败统计' : toolFailureCount === 0 ? '当前会话没有已记录的失败调用' : '定位当前会话的失败工具调用' },
     { id: 'compactions', label: '上下文压缩', value: compactionCount == null ? '—' : compactionCount.toLocaleString(), unit: '次', title: compactionCount == null ? '正在读取上下文压缩统计' : compactionCount === 0 ? '当前会话没有已记录的上下文压缩' : '定位当前会话的上下文压缩记录' },
-    { id: 'requests', label: '模型调用', value: `${usage.completeness === 'partial' ? '≥ ' : ''}${usage.requestCount.toLocaleString()}`, unit: '次', title: '查看模型调用趋势' },
+    { id: 'requests', label: '模型调用', value: usage.completeness === 'unknown' ? '未记录' : `${usage.completeness === 'partial' ? '≥ ' : ''}${usage.requestCount.toLocaleString()}`, unit: usage.completeness === 'unknown' ? '' : '次', title: '查看模型调用趋势' },
     { id: 'tools', label: '工具调用', value: toolCount.toLocaleString(), unit: '次', title: '当前会话记录的工具调用次数，不包含子会话' },
     { id: 'cache', label: '缓存命中', value: cachePercent == null ? '—' : `${cachePercent}%`, unit: '输入中', title: '查看缓存读取占输入的比例' },
     { id: 'duration', label: '会话耗时', value: sessionDuration(durationMs), unit: '', title: durationMs == null ? '日志缺少有效时间，无法计算会话耗时' : '首条至末条有效日志记录的时间跨度，包含等待和暂停；随新记录更新' },
@@ -41,7 +41,7 @@ export function UsageBlock({ usage, label }: { usage: UsageSummary; label: strin
   const facts = [
     ['缓存写入', exactTokens(value?.cacheWriteInputTokens)],
     [<>推理输出 <span title="属于输出的一部分，不与输出重复相加">ⓘ</span></>, exactTokens(value?.reasoningOutputTokens)],
-    ['模型调用', `${usage.completeness === 'partial' ? '至少 ' : ''}${usage.requestCount} 次`],
+    ['模型调用', usage.completeness === 'unknown' ? '未记录' : `${usage.completeness === 'partial' ? '至少 ' : ''}${usage.requestCount} 次`],
   ] as const;
   return <section className="usage-block border-b border-[var(--border)] px-6 py-5">
     <div className="detail-section-heading flex items-center justify-between gap-3 text-[12px] leading-5 font-medium text-[var(--soft)]"><span>{label}</span>{usage.completeness !== 'complete' && <span className="subtle-badge shrink-0 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-[11px] leading-4 font-normal whitespace-nowrap text-[var(--warning)]">{usage.completeness === 'partial' ? '部分记录' : '缺少记录'}</span>}</div>

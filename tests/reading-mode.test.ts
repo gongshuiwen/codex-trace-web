@@ -52,13 +52,22 @@ describe('reading process boundaries', () => {
 
 describe('reading mode turn rendering', () => {
   const usage = { tokens: null, requestCount: 0, completeness: 'unknown' as const, latestInputTokens: null, contextWindow: null };
-  function render(sessionId: string, events: TimelineEvent[], options: { readingMode?: boolean; status?: TurnSummary['status']; target?: { toolId: string; kind: 'search' | 'failure' } } = {}) {
-    const turn: TurnSummary = { id: 'turn', index: 0, prompt: 'USER_REQUEST', preview: '', startedAt: '2026-11-04T00:00:00Z', status: options.status ?? 'completed', model: 'test', toolCount: events.filter(entry => entry.kind === 'tool').length, usage, startOffset: 0, endOffset: 1 };
+  function render(sessionId: string, events: TimelineEvent[], options: { readingMode?: boolean; status?: TurnSummary['status']; usage?: TurnSummary['usage']; target?: { toolId: string; kind: 'search' | 'failure' } } = {}) {
+    const turn: TurnSummary = { id: 'turn', index: 0, prompt: 'USER_REQUEST', preview: '', startedAt: '2026-11-04T00:00:00Z', status: options.status ?? 'completed', model: 'test', toolCount: events.filter(entry => entry.kind === 'tool').length, usage: options.usage ?? usage, startOffset: 0, endOffset: 1 };
     turnDetailCache.put(sessionId, turn.id, 'revision', { summary: turn, events: [event('request', 'user', 'USER_REQUEST'), ...events], requests: [], warnings: [] });
     return renderRecords(createElement(TurnCard, { turn, sessionId, revision: 'revision', onUsage() {}, targetTurn: null, readingMode: options.readingMode, onNavigateFinalAnswer() {},
       toolTarget: options.target && { turnId: turn.id, eventId: `event-${options.target.toolId}`, toolId: options.target.toolId, kind: options.target.kind, version: 1, reveal: true },
     }));
   }
+
+  it.each([
+    ['unknown', 0, '模型调用未记录'],
+    ['complete', 0, '0 次模型调用'],
+    ['partial', 2, '至少 2 次模型调用'],
+  ] as const)('distinguishes %s call counts in the turn usage tooltip', (completeness, requestCount, label) => {
+    const html = render(`reading-call-count-${completeness}`, [], { usage: { ...usage, completeness, requestCount } });
+    expect(html).toContain(`title="0 次工具调用 · ${label}"`);
+  });
 
   it('keeps the full timeline as the default and gives both modes the same block process anchor', () => {
     const events = [event('process', 'commentary', 'PROCESS_BODY'), event('answer', 'assistant', 'FINAL_BODY')];

@@ -2,7 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { latestInputWindowPercent, sessionDuration } from '../client/session-metrics';
-import { SessionStats } from '../client/Stats';
+import { SessionStats, UsageBlock } from '../client/Stats';
+import type { UsageSummary } from '../shared/types';
+
+describe('model call count display', () => {
+  it.each([
+    ['unknown', 0, '未记录', '未记录'],
+    ['complete', 0, '0次', '0 次'],
+    ['complete', 3, '3次', '3 次'],
+    ['partial', 2, '≥ 2次', '至少 2 次'],
+  ] as const)('renders %s usage with %i records consistently', (completeness, requestCount, summaryText, detailsText) => {
+    const usage: UsageSummary = { tokens: null, requestCount, completeness, latestInputTokens: null, contextWindow: null };
+    const summary = renderToStaticMarkup(createElement(SessionStats, { usage, toolCount: 0, onDetails() {} }));
+    const metric = summary.match(/data-metric="requests"[^>]*>([\s\S]*?)<\/button>/)?.[1];
+    expect(metric?.replace(/<[^>]*>/g, '')).toBe(`模型调用${summaryText}`);
+    const details = renderToStaticMarkup(createElement(UsageBlock, { usage, label: '会话用量' }));
+    const count = details.match(/<dt[^>]*>模型调用<\/dt><dd[^>]*>(.*?)<\/dd>/)?.[1];
+    expect(count).toBe(detailsText);
+  });
+});
 
 describe('latest input window ratio', () => {
   it('uses the latest input rather than cumulative or cached token totals', () => {
