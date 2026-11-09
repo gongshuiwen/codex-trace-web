@@ -110,6 +110,8 @@ pnpm build
 
 `client/` 为浏览器应用，`server/` 为 Fastify API、Worker 索引和日志解析，`shared/` 为前后端共享类型，`tests/` 使用合成日志进行回归。源码不包含个人日志和索引数据库。
 
+模块职责、运行结构、数据流和缓存一致性见 [架构说明](docs/architecture.md)。
+
 接口、请求参数、响应示例、错误约定与 SSE 实时事件见 [前后端契约文档](docs/frontend-backend-contract.md)。
 
 Node.js 24 的 `node:sqlite` 可能打印实验性提示；应用使用其内置 SQLite，避免额外安装原生数据库模块。
