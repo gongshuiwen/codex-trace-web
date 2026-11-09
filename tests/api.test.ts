@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { appendFile, mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -53,6 +53,7 @@ function expectSourceLocation(match: ToolSearchMatch, source: string): void {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const resource of resources.splice(0)) {
     await resource.app.close();
     await resource.index.stop();
@@ -122,6 +123,40 @@ describe('local HTTP API', () => {
     const settings = (await app.inject('/api/settings')).json();
     expect((await app.inject({ method: 'PUT', url: '/api/settings', payload: { sessionsDir: path.join(root, 'absent') } })).statusCode).toBe(400);
     expect((await app.inject('/api/settings')).json()).toEqual(settings);
+  });
+
+  it.each([
+    { resource: 'missing turn', endpoint: '/turns/no-such-turn', message: '未找到此轮次。' },
+    { resource: 'missing tool output', endpoint: '/tools/no-such-call/output', message: '未找到工具输出。' },
+    { resource: 'tool with no output record', endpoint: '/tools/pending-call/output', message: '未找到工具输出。' },
+  ])('returns a 404 JSON error for a $resource', async ({ endpoint, message }) => {
+    const { app } = await fixture([{ id: 'pending-call', arguments: '{}' }]);
+    const response = await app.inject(`/api/sessions/api-session${endpoint}`);
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ message });
+  });
+
+  it('serves recorded empty tool output and exhausted output pages successfully', async () => {
+    const { app } = await fixture([
+      { id: 'empty-call', arguments: '{}', output: '' },
+      { id: 'complete-call', arguments: '{}', output: 'done' },
+    ]);
+    const empty = await app.inject('/api/sessions/api-session/tools/empty-call/output');
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json()).toEqual({ text: '', offset: 0, nextOffset: null, totalLength: 0 });
+
+    const exhausted = await app.inject('/api/sessions/api-session/tools/complete-call/output?offset=4');
+    expect(exhausted.statusCode).toBe(200);
+    expect(exhausted.json()).toEqual({ text: '', offset: 4, nextOffset: null, totalLength: 4 });
+  });
+
+  it('keeps unexpected resource lookup failures as masked 500 errors', async () => {
+    const { app, index } = await fixture();
+    vi.spyOn(index, 'getPath').mockRejectedValueOnce(new Error('PRIVATE_INDEX_FAILURE'));
+
+    const response = await app.inject('/api/sessions/api-session/turns/turn-api');
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ message: '读取日志时发生错误，请稍后重试。' });
   });
 
   it('locates every argument and output occurrence in tool, field and source order with compatible excerpts', async () => {

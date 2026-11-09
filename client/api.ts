@@ -4,8 +4,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     headers: { 'Content-Type': 'application/json', ...options.headers },
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(body?.error ?? `请求失败 (${response.status})`);
+    const body = await response.json().catch(() => null) as { message?: unknown } | null;
+    const message = typeof body?.message === 'string' && body.message.trim()
+      ? body.message : `请求失败 (${response.status})`;
+    throw new Error(message);
   }
   return response.json() as Promise<T>;
 }

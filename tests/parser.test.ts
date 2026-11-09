@@ -202,7 +202,7 @@ describe('Codex rollout parser', () => {
     const detail = await loadTurnDetail(location, 'child-turn');
     expect(detail.requests.map(request => request.id)).toEqual(['child-response']);
     expect(detail.requests[0]?.turnId).toBe('child-turn');
-    await expect(loadTurnDetail(location, 'parent-turn')).rejects.toThrow('未找到回合');
+    await expect(loadTurnDetail(location, 'parent-turn')).rejects.toMatchObject({ message: '未找到此轮次。', statusCode: 404 });
   });
 
   it('keeps the first real prompt in summaries while preserving follow-up steering in the timeline', async () => {

@@ -451,7 +451,7 @@ function inferOutput(payload: Json, output: string): Pick<ToolCall, 'status' | '
 export async function loadTurnDetail(filePath: string, turnId: string): Promise<TurnDetail> {
   const state = await getState(filePath);
   const summary = state.index!.turns.find(turn => turn.id === turnId);
-  if (!summary) throw new Error('未找到回合');
+  if (!summary) throw Object.assign(new Error('未找到此轮次。'), { statusCode: 404 });
   const events: TimelineEvent[] = [];
   const calls = new Map<string, ToolCall>();
   const messageIds = new Set<string>();
@@ -562,7 +562,7 @@ export async function loadCompactions(filePath: string, offset = 0, limit = 20):
 export async function loadToolOutput(filePath: string, callId: string, offset = 0, limit = DEFAULT_OUTPUT_LIMIT): Promise<OutputPage> {
   const state = await getState(filePath);
   const location = state.outputs.get(callId);
-  if (!location) throw new Error('未找到工具输出');
+  if (!location) throw Object.assign(new Error('未找到工具输出。'), { statusCode: 404 });
   const from = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
   const count = Number.isFinite(limit) ? Math.min(MAX_PAGE_LIMIT, Math.max(1, Math.floor(limit))) : DEFAULT_OUTPUT_LIMIT;
   for await (const line of readLines(path.resolve(filePath), location.start, location.end)) {
@@ -574,5 +574,5 @@ export async function loadToolOutput(filePath: string, callId: string, offset = 
     const text = output.slice(from, from + count);
     return { text, offset: from, nextOffset: from + text.length < output.length ? from + text.length : null, totalLength: output.length };
   }
-  throw new Error('工具输出记录已变更，请刷新会话');
+  throw Object.assign(new Error('工具输出记录已变更，请刷新会话。'), { statusCode: 404 });
 }
